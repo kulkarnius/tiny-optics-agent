@@ -2,10 +2,19 @@ import logging
 import os
 import json
 from mcp.server.fastmcp import FastMCP, Image
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Import our hardware classes from the devices folder
-from devices.motor import MockMotor
 from devices.camera import MockCamera
+
+from devices.motor import MockMotor
+try:
+    from devices.pdxc_motor import PDXCMotor
+    _PDXCMotor = PDXCMotor
+except Exception:
+    _PDXCMotor = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -16,13 +25,29 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("Hardware Controller")
 
 # Instantiate our "live" hardware singletons
-logger.info("Initializing hardware devices...")
-try:
+# Set MOTOR_TYPE in .env to "pdxc", "mock", or leave unset for auto-detection.
+MOTOR_TYPE = os.environ.get("MOTOR_TYPE", "auto").lower()
+logger.info("Initializing hardware devices (MOTOR_TYPE=%s)...", MOTOR_TYPE)
+
+motor = None
+if MOTOR_TYPE == "pdxc":
+    if _PDXCMotor is None:
+        raise ImportError("MOTOR_TYPE=pdxc but PDXC SDK is unavailable.")
+    motor = _PDXCMotor()
+    logger.info("PDXC motor initialized.")
+elif MOTOR_TYPE == "mock":
     motor = MockMotor()
-    logger.info("Motor initialized.")
-except Exception as e:
-    logger.error("Failed to initialize motor: %s", e)
-    raise
+    logger.info("Mock motor initialized.")
+else:  # auto
+    if _PDXCMotor is not None:
+        try:
+            motor = _PDXCMotor()
+            logger.info("PDXC motor initialized.")
+        except Exception as e:
+            logger.warning("PDXC motor unavailable (%s), falling back to MockMotor.", e)
+    if motor is None:
+        motor = MockMotor()
+        logger.info("Mock motor initialized.")
 
 try:
     camera = MockCamera()
@@ -64,20 +89,35 @@ def get_latest_image() -> Image:
 # ==========================================
 
 @mcp.tool()
-async def move_motor(target_position_deg: float) -> str:
+async def move_motor(target_position: float) -> str:
     """
     Moves the motor to an absolute target position.
 
     Args:
-        target_position_deg: The target angle in degrees (0.0 to 360.0).
+        target_position: The target position in mm (for PDXC) or degrees (0-360) for mock motor.
     """
-    # FastMCP automatically surfaces the arg description to Gemini
-    if not (0.0 <= target_position_deg <= 360.0):
-        return "Error: target_position_deg out of bounds. Must be 0-360."
+    try:
+        final_pos = await motor.move_to(target_position)
+        return f"Success: Motor movement completed. Current position is {final_pos}."
+    except Exception as e:
+        return f"Error: {e}"
 
-    # Async execution: The motor moves while the server stays responsive
-    final_pos = await motor.move_to(target_position_deg)
-    return f"Success: Motor movement completed. Current position is {final_pos} deg."
+
+@mcp.tool()
+async def home_motor() -> str:
+    """Homes the motor. Required before closed-loop moves on real hardware."""
+    if hasattr(motor, "home"):
+        await motor.home()
+        return f"Success: Motor homed. State: {motor.get_state().model_dump()}"
+    return "Home not supported on this motor type."
+
+
+@mcp.tool()
+async def refresh_motor() -> str:
+    """Reads the current hardware position and syncs the internal state."""
+    if hasattr(motor, "refresh"):
+        await motor.refresh()
+    return json.dumps(motor.get_state().model_dump())
 
 @mcp.tool()
 async def configure_camera(exposure_ms: int) -> str:
