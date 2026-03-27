@@ -1,16 +1,19 @@
 import os
 import cv2
 import numpy as np
+from pathlib import Path
 from pydantic import Field
 from typing import Optional
 from .base import BaseDevice, DeviceState, Status
+
+_DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
 class CameraState(DeviceState):
     exposure: int = Field(default=100, ge=1, le=2000)
     last_image_path: Optional[str] = None
 
 class MockCamera(BaseDevice):
-    def __init__(self, data_dir="data"):
+    def __init__(self, data_dir=_DEFAULT_DATA_DIR):
         super().__init__()
         self.state = CameraState()
         self.data_dir = data_dir
