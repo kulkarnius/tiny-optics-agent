@@ -116,9 +116,9 @@ class PDXCMotor(BaseDevice):
             if self.state.status != Status.ERROR:
                 self.state.status = Status.IDLE
 
-    async def set_speed(self, speed: float) -> None:
+    async def set_speed(self, speed: int) -> None:
         """Set the closed-loop target speed (mm/s or deg/s depending on stage)."""
-        ret = await asyncio.to_thread(self._pdxc.SetTargetSpeed, 0, speed)
+        ret = await asyncio.to_thread(self._pdxc.SetTargetSpeed, 0, int(speed))
         if ret == 0:
             self.state.speed = speed
 

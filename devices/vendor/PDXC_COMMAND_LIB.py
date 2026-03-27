@@ -39,7 +39,7 @@ class pdxc:
         pdxc.isLoad = True
 
     def __init__(self):
-        lib_path = r"C:\Program Files (x86)\Thorlabs\PDXC\Sample\Thorlabs_PDXC_PythonSDK\PDXC_COMMAND_LIB_win32.dll"
+        lib_path = "C:/Program Files (x86)/Thorlabs/PDXC/Sample/Thorlabs_PDXC_PythonSDK/PDXC_COMMAND_LIB_win64.dll"
         if not pdxc.isLoad:
             pdxc.load_library(lib_path)
         self.hdl = -1

@@ -17,7 +17,7 @@ chromadb
 
 # --- Optional: real hardware drivers ---
 # Uncomment if using a real ImagingSource GigE camera:
-# harvesters
+harvesters
 #
 # The Thorlabs PDXC SDK (PDXC_COMMAND_LIB) is bundled in devices/vendor/
 # and does not require a separate pip install.

@@ -12,7 +12,7 @@ async def main():
     print(f"State after homing: {motor.get_state()}\n")
 
     print("--- Setting speed to 5 mm/s ---")
-    await motor.set_speed(5.0)
+    await motor.set_speed(5)
     print(f"State after speed set: {motor.get_state()}\n")
 
     print("--- Moving to 1.0 mm ---")
