@@ -39,8 +39,10 @@ class ImagingSourceCamera(BaseDevice):
 
     def _do_capture(self) -> str:
         """Synchronous capture executed in a thread pool to avoid blocking the event loop."""
-        # Set exposure (GenICam ExposureTime node expects microseconds)
+        # Set exposure (GenICam ExposureTime node expects microseconds).
+        # ExposureAuto must be Off or the ExposureTime node is read-only.
         node_map = self._ia.remote_device.node_map
+        node_map.ExposureAuto.value = "Off"
         node_map.ExposureTime.value = float(self.state.exposure * 1000)
 
         self._ia.start()
