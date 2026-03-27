@@ -2,10 +2,13 @@ import asyncio
 import os
 import cv2
 import numpy as np
+from pathlib import Path
 from pydantic import Field
 from typing import Optional
 from harvesters.core import Harvester
 from .base import BaseDevice, DeviceState, Status
+
+_DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
 
 class ImagingSourceCameraState(DeviceState):
@@ -14,7 +17,7 @@ class ImagingSourceCameraState(DeviceState):
 
 
 class ImagingSourceCamera(BaseDevice):
-    def __init__(self, serial_number: str, cti_path: str, data_dir: str = "data"):
+    def __init__(self, serial_number: str, cti_path: str, data_dir: str = _DEFAULT_DATA_DIR):
         """
         Args:
             serial_number: The serial number of the target Imaging Source GigE camera.
