@@ -86,7 +86,8 @@ else:  # auto
 # RESOURCES (Data the LLM can read)
 # ==========================================
 
-@mcp.resource("hardware://inventory")
+#@mcp.resource("hardware://inventory")
+@mcp.tool()
 def get_inventory() -> str:
     """Returns a JSON snapshot of all hardware devices and their current states."""
     inventory = {
@@ -95,7 +96,8 @@ def get_inventory() -> str:
     }
     return json.dumps(inventory, indent=2)
 
-@mcp.resource("camera://latest")
+#@mcp.resource("camera://latest")
+@mcp.tool()
 def get_latest_image() -> Image:
     """Returns the raw binary data of the most recently captured image."""
     image_path = camera.state.last_image_path
