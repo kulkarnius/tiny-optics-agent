@@ -6,7 +6,7 @@ from typing import Optional
 from .base import BaseDevice, DeviceState, Status
 
 class CameraState(DeviceState):
-    exposure: int = Field(default=100, ge=1, le=1000)
+    exposure: int = Field(default=100, ge=1, le=2000)
     last_image_path: Optional[str] = None
 
 class MockCamera(BaseDevice):
