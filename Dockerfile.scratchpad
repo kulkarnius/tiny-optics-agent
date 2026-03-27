@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+RUN pip install --no-cache-dir \
+    numpy \
+    scipy \
+    sympy \
+    matplotlib \
+    opencv-python-headless
+
+RUN useradd -m -u 1000 sandbox \
+    && mkdir -p /shared \
+    && chown sandbox:sandbox /shared
+
+COPY scratchpad/executor.py /app/executor.py
+RUN chown sandbox:sandbox /app/executor.py
+
+USER sandbox
+WORKDIR /shared
+
+ENV MPLBACKEND=Agg
+
+CMD ["sleep", "infinity"]
