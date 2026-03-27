@@ -8,13 +8,19 @@ load_dotenv()
 
 # Import our hardware classes from the devices folder
 from devices.camera import MockCamera
-
 from devices.motor import MockMotor
+
 try:
     from devices.pdxc_motor import PDXCMotor
     _PDXCMotor = PDXCMotor
 except Exception:
     _PDXCMotor = None
+
+try:
+    from devices.imaging_source_camera import ImagingSourceCamera
+    _ImagingSourceCamera = ImagingSourceCamera
+except Exception:
+    _ImagingSourceCamera = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -27,7 +33,8 @@ mcp = FastMCP("Hardware Controller")
 # Instantiate our "live" hardware singletons
 # Set MOTOR_TYPE in .env to "pdxc", "mock", or leave unset for auto-detection.
 MOTOR_TYPE = os.environ.get("MOTOR_TYPE", "auto").lower()
-logger.info("Initializing hardware devices (MOTOR_TYPE=%s)...", MOTOR_TYPE)
+CAMERA_TYPE = os.environ.get("CAMERA_TYPE", "auto").lower()
+logger.info("Initializing hardware devices (MOTOR_TYPE=%s, CAMERA_TYPE=%s)...", MOTOR_TYPE, CAMERA_TYPE)
 
 motor = None
 if MOTOR_TYPE == "pdxc":
@@ -49,12 +56,31 @@ else:  # auto
         motor = MockMotor()
         logger.info("Mock motor initialized.")
 
-try:
+camera = None
+if CAMERA_TYPE == "imaging_source":
+    if _ImagingSourceCamera is None:
+        raise ImportError("CAMERA_TYPE=imaging_source but harvesters SDK is unavailable.")
+    camera = _ImagingSourceCamera(
+        serial_number=os.environ["CAMERA_SERIAL_NUMBER"],
+        cti_path=os.environ["GENTL_CTI_PATH"],
+    )
+    logger.info("ImagingSource camera initialized.")
+elif CAMERA_TYPE == "mock":
     camera = MockCamera()
-    logger.info("Camera initialized.")
-except Exception as e:
-    logger.error("Failed to initialize camera: %s", e)
-    raise
+    logger.info("Mock camera initialized.")
+else:  # auto
+    if _ImagingSourceCamera is not None:
+        try:
+            camera = _ImagingSourceCamera(
+                serial_number=os.environ["CAMERA_SERIAL_NUMBER"],
+                cti_path=os.environ["GENTL_CTI_PATH"],
+            )
+            logger.info("ImagingSource camera initialized.")
+        except Exception as e:
+            logger.warning("ImagingSource camera unavailable (%s), falling back to MockCamera.", e)
+    if camera is None:
+        camera = MockCamera()
+        logger.info("Mock camera initialized.")
 
 # ==========================================
 # RESOURCES (Data the LLM can read)
