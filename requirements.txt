@@ -1,0 +1,23 @@
+# Core MCP framework (required by all three servers)
+mcp[cli]
+python-dotenv
+pydantic
+
+# --- Hardware Server ---
+numpy
+opencv-python
+
+# --- RAG Server ---
+sentence-transformers
+chromadb
+
+# --- Scratchpad Server ---
+# (No extra Python packages — the sandbox runs inside Docker)
+# Docker must be installed separately: https://docs.docker.com/get-docker/
+
+# --- Optional: real hardware drivers ---
+# Uncomment if using a real ImagingSource GigE camera:
+# harvesters
+#
+# The Thorlabs PDXC SDK (PDXC_COMMAND_LIB) is bundled in devices/vendor/
+# and does not require a separate pip install.
