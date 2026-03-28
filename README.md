@@ -83,7 +83,7 @@ Expected output: motor move and camera capture succeed with mock devices.
 ### RAG pipeline
 
 ```bash
-pytest test_rag.py -v
+python -m pytest test_rag.py -v
 ```
 
 This tests chunking, embedding, and vector search in isolation using temporary directories. No documents need to be in `documents/` beforehand.
@@ -94,7 +94,7 @@ Build the sandbox image first, then run the tests:
 
 ```bash
 docker build -f Dockerfile.scratchpad -t scratchpad-sandbox .
-pytest test_scratchpad.py -v
+python -m pytest test_scratchpad.py -v
 ```
 
 Tests cover: arithmetic, NumPy/SciPy/SymPy, matplotlib auto-save, stateful execution, session reset, timeout enforcement, network isolation, and read-only filesystem.

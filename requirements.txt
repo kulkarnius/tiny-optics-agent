@@ -11,6 +11,9 @@ opencv-python
 sentence-transformers
 chromadb
 
+# --- Testing ---
+pytest
+
 # --- Scratchpad Server ---
 # (No extra Python packages — the sandbox runs inside Docker)
 # Docker must be installed separately: https://docs.docker.com/get-docker/
