@@ -1,6 +1,9 @@
+import atexit
 import logging
 import os
 import json
+import signal
+import sys
 from mcp.server.fastmcp import FastMCP, Image
 from dotenv import load_dotenv
 
@@ -173,6 +176,33 @@ async def capture_image() -> str:
     filepath = await camera.capture()
     return (f"Success: Image captured and saved to disk at {filepath}. "
             f"To view the image, read the resource: 'camera://latest'")
+
+
+def _close_devices() -> None:
+    """Release all hardware resources on exit."""
+    for name, device in (("motor", motor), ("camera", camera)):
+        if device is not None and hasattr(device, "close"):
+            try:
+                device.close()
+                logger.info("%s closed.", name)
+            except Exception as e:
+                logger.warning("Error closing %s: %s", name, e)
+
+
+atexit.register(_close_devices)
+
+
+def _signal_handler(sig, frame) -> None:
+    logger.info("Received signal %s, shutting down...", sig)
+    sys.exit(0)  # triggers atexit
+
+
+for _sig in (signal.SIGINT, signal.SIGTERM):
+    signal.signal(_sig, _signal_handler)
+
+# SIGBREAK is Windows-only (Ctrl+Break)
+if hasattr(signal, "SIGBREAK"):
+    signal.signal(signal.SIGBREAK, _signal_handler)
 
 
 if __name__ == "__main__":
