@@ -18,6 +18,13 @@ pytest
 # (No extra Python packages — the sandbox runs inside Docker)
 # Docker must be installed separately: https://docs.docker.com/get-docker/
 
+# --- Ingestion Pipeline ---
+marker-pdf>=1.3          # Primary PDF-to-markdown (layout model, LaTeX/heading support)
+pymupdf4llm>=0.0.17      # Fallback PDF-to-markdown (font-size heuristics)
+pdfminer.six>=20221105   # PDF metadata extraction from document info dict
+watchdog>=4.0            # Filesystem event monitoring for the drop/ folder
+httpx>=0.27              # Optional arXiv API metadata enrichment
+
 # --- Optional: real hardware drivers ---
 # Uncomment if using a real ImagingSource GigE camera:
 harvesters
