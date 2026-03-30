@@ -76,9 +76,11 @@ def record_run(
     run_dir = results_dir / run_id
     run_dir.mkdir(parents=True)
 
-    # Copy figures from shared/ into the run directory
+    # Copy figures from shared/ into the run directory.
+    # result.figures may contain full /shared/<name> paths or bare filenames.
     figures = []
-    for filename in result.figures:
+    for figure_entry in result.figures:
+        filename = Path(figure_entry).name
         src = shared_dir / filename
         if not src.exists():
             logger.warning("Figure %s not found in shared dir, skipping", filename)
