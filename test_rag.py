@@ -1,13 +1,24 @@
-"""Tests for the RAG pipeline: chunker, embedder, and index."""
+"""Tests for the RAG pipeline: chunker, embedder, index, and ingestion pipeline."""
 
+import hashlib
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from rag.chunker import Chunk, chunk_markdown, extract_heading_outline
 from rag.embedder import Embedder
 from rag.index import RAGIndex
+from ingest.metadata import PaperMetadata, _extract_from_text, render_yaml_front_matter
+from ingest.pipeline import (
+    IngestPipeline,
+    PID_FILE,
+    _make_stem,
+    _pdf_sha256,
+    is_pipeline_running,
+)
 
 # ==========================================
 # Sample markdown content for testing
@@ -431,3 +442,276 @@ class TestRAGIndex:
         results = idx.search("Newton's second law F=ma")
         mechanics_results = [r for r in results if r.source_file == "mechanics.md"]
         assert len(mechanics_results) > 0
+
+
+# ==========================================
+# Ingestion Pipeline Tests
+# ==========================================
+
+# Realistic markdown that the converter would produce for a physics paper
+MOCK_CONVERTED_MARKDOWN = """\
+## Introduction
+
+This paper presents results on gravitational wave detection using laser interferometry.
+Binary black hole mergers produce characteristic chirp signals detectable by LIGO.
+
+## Methods
+
+We used a Michelson interferometer with 4 km arms to measure spacetime strain.
+The instrument achieves a sensitivity of $10^{-23}$ Hz$^{-1/2}$ at 100 Hz.
+
+## Results
+
+We detected a signal consistent with a binary black hole merger at redshift z=0.09.
+The peak gravitational wave strain was $h = 1.0 \\times 10^{-21}$.
+
+## Conclusion
+
+This confirms the existence of gravitational waves as predicted by general relativity.
+"""
+
+
+def _fake_pdf(path: Path, content: bytes = b"%PDF-1.4 fake content for testing") -> Path:
+    """Write a fake PDF file (converter is mocked, so content only affects SHA-256)."""
+    path.write_bytes(content)
+    return path
+
+
+class TestIngestMetadata:
+    def test_doi_extraction(self):
+        meta = PaperMetadata(title="Test")
+        _extract_from_text("doi: 10.1103/PhysRevLett.116.061102 something else", meta)
+        assert meta.doi == "10.1103/PhysRevLett.116.061102"
+
+    def test_arxiv_id_inline(self):
+        meta = PaperMetadata(title="Test")
+        _extract_from_text("arXiv:1602.03837 submitted February 2016", meta)
+        assert meta.arxiv_id == "1602.03837"
+
+    def test_arxiv_id_url(self):
+        meta = PaperMetadata(title="Test")
+        _extract_from_text("see https://arxiv.org/abs/2103.00020 for details", meta)
+        assert meta.arxiv_id == "2103.00020"
+
+    def test_year_extraction(self):
+        meta = PaperMetadata(title="Test")
+        _extract_from_text("Published in Physical Review Letters in 2016.", meta)
+        assert meta.year == 2016
+
+    def test_no_metadata_in_text(self):
+        meta = PaperMetadata(title="Test")
+        _extract_from_text("No useful metadata here at all.", meta)
+        assert meta.doi is None
+        assert meta.arxiv_id is None
+        assert meta.year is None
+
+    def test_doi_not_overwritten_if_already_set(self):
+        meta = PaperMetadata(title="Test", doi="10.existing/doi")
+        _extract_from_text("doi: 10.1103/new.doi", meta)
+        assert meta.doi == "10.existing/doi"
+
+    def test_yaml_front_matter_structure(self):
+        meta = PaperMetadata(
+            title='Gravitational "Wave" Detection',
+            authors=["Abbott, B.P.", "et al."],
+            year=2016,
+            doi="10.1103/PhysRevLett.116.061102",
+            arxiv_id="1602.03837",
+            source_pdf="ligo.pdf",
+            ingested_at="2026-03-29T00:00:00Z",
+            sha256="abc123",
+        )
+        yaml = render_yaml_front_matter(meta)
+        assert yaml.startswith("---\n")
+        assert yaml.endswith("\n---")
+        assert 'title: "Gravitational \\"Wave\\" Detection"' in yaml
+        assert '"Abbott, B.P."' in yaml
+        assert "year: 2016" in yaml
+        assert 'doi: "10.1103/PhysRevLett.116.061102"' in yaml
+        assert 'arxiv_id: "1602.03837"' in yaml
+
+    def test_yaml_null_fields(self):
+        meta = PaperMetadata(title="Untitled", sha256="x" * 12)
+        yaml = render_yaml_front_matter(meta)
+        assert "doi: null" in yaml
+        assert "arxiv_id: null" in yaml
+        assert "year: null" in yaml
+
+    def test_yaml_empty_authors(self):
+        meta = PaperMetadata(title="T", sha256="x" * 12)
+        yaml = render_yaml_front_matter(meta)
+        assert "authors: []" in yaml
+
+
+class TestIngestStem:
+    def test_prefers_arxiv_id(self):
+        meta = PaperMetadata(title="T", arxiv_id="1602.03837", doi="10.1103/x", sha256="a" * 64)
+        assert _make_stem(meta) == "1602.03837"
+
+    def test_falls_back_to_doi_slug(self):
+        meta = PaperMetadata(title="T", doi="10.1103/PhysRevLett.116.061102", sha256="a" * 64)
+        stem = _make_stem(meta)
+        assert "/" not in stem
+        assert "10" in stem
+
+    def test_falls_back_to_sha256_prefix(self):
+        meta = PaperMetadata(title="T", sha256="abcdef1234567890")
+        assert _make_stem(meta) == "abcdef123456"
+
+    def test_doi_slug_max_length(self):
+        meta = PaperMetadata(title="T", doi="10.1234/" + "x" * 200, sha256="a" * 64)
+        assert len(_make_stem(meta)) <= 80
+
+
+class TestIsPipelineRunning:
+    def test_returns_false_when_no_pid_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("ingest.pipeline.PID_FILE", tmp_path / "ingest.pid")
+        assert not is_pipeline_running()
+
+    def test_returns_true_for_current_process(self, tmp_path, monkeypatch):
+        pid_file = tmp_path / "ingest.pid"
+        pid_file.write_text(str(os.getpid()))
+        monkeypatch.setattr("ingest.pipeline.PID_FILE", pid_file)
+        assert is_pipeline_running()
+
+    def test_returns_false_for_invalid_pid_content(self, tmp_path, monkeypatch):
+        pid_file = tmp_path / "ingest.pid"
+        pid_file.write_text("not-a-number")
+        monkeypatch.setattr("ingest.pipeline.PID_FILE", pid_file)
+        assert not is_pipeline_running()
+
+    def test_handles_stale_pid_gracefully(self, tmp_path, monkeypatch):
+        """A stale PID file from a crash must not raise — just return False."""
+        pid_file = tmp_path / "ingest.pid"
+        pid_file.write_text("99999999")
+        monkeypatch.setattr("ingest.pipeline.PID_FILE", pid_file)
+        result = is_pipeline_running()
+        assert isinstance(result, bool)
+
+
+class TestIngestPipeline:
+    @pytest.fixture(scope="class")
+    def embedder(self):
+        return Embedder()
+
+    @pytest.fixture
+    def pipeline(self, tmp_path: Path, embedder: Embedder):
+        docs_dir = tmp_path / "documents"
+        data_dir = tmp_path / "data"
+        drop_dir = tmp_path / "drop"
+        docs_dir.mkdir()
+        data_dir.mkdir()
+        drop_dir.mkdir()
+        (drop_dir / "archive").mkdir()
+
+        rag_index = RAGIndex(docs_dir=docs_dir, data_dir=data_dir, embedder=embedder)
+        return IngestPipeline(
+            docs_dir=docs_dir,
+            data_dir=data_dir,
+            drop_dir=drop_dir,
+            log_path=tmp_path / "logs" / "ingestion.log",
+            rag_index=rag_index,
+        )
+
+    def test_md_written_to_docs_dir(self, pipeline: IngestPipeline, tmp_path: Path):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        assert len(list(pipeline.docs_dir.glob("*.md"))) == 1
+
+    def test_output_has_yaml_front_matter(self, pipeline: IngestPipeline, tmp_path: Path):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        content = next(pipeline.docs_dir.glob("*.md")).read_text(encoding="utf-8")
+        assert content.startswith("---")
+        assert "source_pdf:" in content
+        assert "sha256:" in content
+        assert "ingested_at:" in content
+
+    def test_markdown_body_included(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        content = next(pipeline.docs_dir.glob("*.md")).read_text(encoding="utf-8")
+        assert "## Introduction" in content
+        assert "gravitational wave" in content
+
+    def test_pdf_archived(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        assert not pdf.exists()
+        assert (pipeline.archive_dir / "paper.pdf").exists()
+
+    def test_sha256_persisted(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        sha256 = _pdf_sha256(pdf)
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        hashes = json.loads((pipeline.data_dir / "processed_hashes.json").read_text())
+        assert sha256 in hashes
+
+    def test_duplicate_skipped(self, pipeline: IngestPipeline):
+        content = b"%PDF-1.4 unique bytes for dedup test"
+        pdf1 = _fake_pdf(pipeline.drop_dir / "paper_a.pdf", content)
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf1)
+        count_after_first = len(list(pipeline.docs_dir.glob("*.md")))
+
+        # Drop exact duplicate with different filename
+        pdf2 = _fake_pdf(pipeline.drop_dir / "paper_b.pdf", content)
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf2)
+        assert len(list(pipeline.docs_dir.glob("*.md"))) == count_after_first
+
+    def test_duplicate_logged(self, pipeline: IngestPipeline):
+        content = b"%PDF-1.4 bytes for log test"
+        pdf1 = _fake_pdf(pipeline.drop_dir / "p1.pdf", content)
+        pdf2 = _fake_pdf(pipeline.drop_dir / "p2.pdf", content)
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf1)
+            pipeline.process_pdf(pdf2)
+        log = pipeline.log_path.read_text(encoding="utf-8")
+        assert "DUPLICATE" in log
+
+    def test_ingested_doc_is_searchable(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        results = pipeline.rag_index.search("gravitational wave interferometry")
+        assert len(results) > 0
+
+    def test_log_contains_required_fields(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "paper.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+            pipeline.process_pdf(pdf)
+        log = pipeline.log_path.read_text(encoding="utf-8")
+        assert "source=" in log
+        assert "sha256=" in log
+        assert "outcome=" in log
+        assert "duration=" in log
+
+    def test_conversion_failure_writes_skeleton(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "bad.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=("", "skeleton")):
+            pipeline.process_pdf(pdf)
+        md_files = list(pipeline.docs_dir.glob("*.md"))
+        assert len(md_files) == 1
+        content = md_files[0].read_text(encoding="utf-8")
+        assert "No extractable text" in content
+
+    def test_conversion_failure_logged(self, pipeline: IngestPipeline):
+        pdf = _fake_pdf(pipeline.drop_dir / "bad.pdf")
+        with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=("", "skeleton")):
+            pipeline.process_pdf(pdf)
+        log = pipeline.log_path.read_text(encoding="utf-8")
+        assert "CONVERSION_FAILED" in log
+
+    def test_multiple_pdfs_all_ingested(self, pipeline: IngestPipeline):
+        for i in range(3):
+            pdf = _fake_pdf(pipeline.drop_dir / f"paper_{i}.pdf", f"unique content {i}".encode())
+            with patch("ingest.pipeline.convert_pdf_to_markdown", return_value=(MOCK_CONVERTED_MARKDOWN, "marker")):
+                pipeline.process_pdf(pdf)
+        assert len(list(pipeline.docs_dir.glob("*.md"))) == 3
+        assert len(list(pipeline.archive_dir.glob("*.pdf"))) == 3

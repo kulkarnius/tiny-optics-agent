@@ -29,6 +29,16 @@ index = RAGIndex(docs_dir=DOCS_DIR, data_dir=DATA_DIR, embedder=embedder)
 logger.info("Syncing document index...")
 index.sync()
 
+try:
+    from ingest.pipeline import is_pipeline_running
+    if not is_pipeline_running():
+        logger.warning(
+            "Ingestion pipeline is not running. PDFs dropped into drop/ will not be "
+            "processed until 'python ingest_pipeline.py' is started."
+        )
+except ImportError:
+    pass
+
 
 class SearchDocumentsParams(BaseModel):
     query: str = Field(min_length=1, max_length=500, description="Search query")
