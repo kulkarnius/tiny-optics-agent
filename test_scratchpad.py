@@ -1,14 +1,20 @@
 """
-Tests for the Python scratchpad Docker backend.
+Tests for the Python scratchpad Docker backend and result versioning.
 
-Requires Docker to be available. Tests build the image, start a container,
-and exercise numeric, symbolic, plotting, stateful, and security scenarios.
+Docker tests require Docker to be available. Versioning tests are pure
+filesystem and run without Docker.
 """
 
 import asyncio
+import hashlib
+import json
+import shutil
+from pathlib import Path
+
 import pytest
 
-from scratchpad.docker_backend import DockerScratchpad
+from scratchpad.docker_backend import DockerScratchpad, ExecutionResult
+from scratchpad import versioning
 
 
 @pytest.fixture(scope="module")
@@ -224,3 +230,177 @@ class TestSession:
         r2 = run(event_loop, scratchpad.execute("print(x)"))
         assert not r2.success
         assert "NameError" in r2.error
+
+
+# ==========================================
+# Result Versioning (no Docker required)
+# ==========================================
+
+def _make_result(**kwargs) -> ExecutionResult:
+    """Build an ExecutionResult with sensible defaults."""
+    defaults = dict(stdout="hello", stderr="", error=None, figures=[], success=True)
+    defaults.update(kwargs)
+    return ExecutionResult(**defaults)
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+class TestVersioningRecord:
+    def test_record_json_created(self, tmp_path):
+        result = _make_result(stdout="42")
+        run_id = versioning.record_run(tmp_path / "results", "sess-1", "print(42)", result, tmp_path / "shared")
+        record_path = tmp_path / "results" / run_id / "record.json"
+        assert record_path.exists()
+
+    def test_record_fields(self, tmp_path):
+        result = _make_result(stdout="out", stderr="err", error=None, success=True)
+        run_id = versioning.record_run(tmp_path / "results", "sess-abc", "x=1", result, tmp_path / "shared")
+        record = json.loads((tmp_path / "results" / run_id / "record.json").read_text())
+
+        assert record["schema_version"] == "1.0"
+        assert record["run_id"] == run_id
+        assert record["session_id"] == "sess-abc"
+        assert record["code"] == "x=1"
+        assert record["stdout"] == "out"
+        assert record["stderr"] == "err"
+        assert record["error"] is None
+        assert record["success"] is True
+        assert "timestamp" in record
+        assert "content_hash" in record
+
+    def test_failed_run_recorded(self, tmp_path):
+        result = _make_result(stdout="", stderr="", error="SyntaxError: invalid syntax", success=False)
+        run_id = versioning.record_run(tmp_path / "results", "sess-1", "def bad(:", result, tmp_path / "shared")
+        record = json.loads((tmp_path / "results" / run_id / "record.json").read_text())
+        assert record["success"] is False
+        assert record["error"] == "SyntaxError: invalid syntax"
+
+
+class TestVersioningFigures:
+    def test_figure_copied_to_run_dir(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        fig_data = b"\x89PNG fake image bytes"
+        (shared / "plot.png").write_bytes(fig_data)
+
+        result = _make_result(figures=["plot.png"])
+        run_id = versioning.record_run(tmp_path / "results", "sess-1", "plt.plot()", result, shared)
+
+        copied = tmp_path / "results" / run_id / "plot.png"
+        assert copied.exists()
+        assert copied.read_bytes() == fig_data
+
+    def test_figure_sha256_in_record(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        fig_data = b"\x89PNG real content"
+        (shared / "fig.png").write_bytes(fig_data)
+
+        result = _make_result(figures=["fig.png"])
+        run_id = versioning.record_run(tmp_path / "results", "sess-1", "plt.plot()", result, shared)
+
+        record = json.loads((tmp_path / "results" / run_id / "record.json").read_text())
+        assert len(record["figures"]) == 1
+        assert record["figures"][0]["filename"] == "fig.png"
+        assert record["figures"][0]["sha256"] == _sha256_bytes(fig_data)
+        assert record["figures"][0]["size_bytes"] == len(fig_data)
+
+    def test_missing_figure_skipped_gracefully(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        # figure listed in result but not present on disk
+        result = _make_result(figures=["ghost.png"])
+        run_id = versioning.record_run(tmp_path / "results", "sess-1", "code", result, shared)
+        record = json.loads((tmp_path / "results" / run_id / "record.json").read_text())
+        assert record["figures"] == []
+
+
+class TestVersioningIndex:
+    def test_index_created_on_first_run(self, tmp_path):
+        result = _make_result()
+        versioning.record_run(tmp_path / "results", "sess-1", "pass", result, tmp_path / "shared")
+        assert (tmp_path / "results" / "index.json").exists()
+
+    def test_index_contains_summary(self, tmp_path):
+        result = _make_result(success=True)
+        run_id = versioning.record_run(tmp_path / "results", "sess-1", "pass", result, tmp_path / "shared")
+        index = json.loads((tmp_path / "results" / "index.json").read_text())
+        assert len(index) == 1
+        entry = index[0]
+        assert entry["run_id"] == run_id
+        assert entry["session_id"] == "sess-1"
+        assert entry["success"] is True
+        assert "timestamp" in entry
+        assert "content_hash" in entry
+
+    def test_index_newest_first(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        results_dir = tmp_path / "results"
+        id1 = versioning.record_run(results_dir, "s", "print(1)", _make_result(stdout="1"), shared)
+        id2 = versioning.record_run(results_dir, "s", "print(2)", _make_result(stdout="2"), shared)
+        id3 = versioning.record_run(results_dir, "s", "print(3)", _make_result(stdout="3"), shared)
+        index = json.loads((results_dir / "index.json").read_text())
+        assert [e["run_id"] for e in index] == [id3, id2, id1]
+
+    def test_multiple_runs_accumulate_in_index(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        results_dir = tmp_path / "results"
+        for i in range(5):
+            versioning.record_run(results_dir, "s", f"print({i})", _make_result(stdout=str(i)), shared)
+        index = json.loads((results_dir / "index.json").read_text())
+        assert len(index) == 5
+
+
+class TestVersioningDeduplication:
+    def test_identical_run_returns_same_id(self, tmp_path):
+        result = _make_result(stdout="42")
+        id1 = versioning.record_run(tmp_path / "results", "s", "print(42)", result, tmp_path / "shared")
+        id2 = versioning.record_run(tmp_path / "results", "s", "print(42)", result, tmp_path / "shared")
+        assert id1 == id2
+
+    def test_duplicate_does_not_grow_index(self, tmp_path):
+        results_dir = tmp_path / "results"
+        result = _make_result(stdout="42")
+        versioning.record_run(results_dir, "s", "print(42)", result, tmp_path / "shared")
+        versioning.record_run(results_dir, "s", "print(42)", result, tmp_path / "shared")
+        index = json.loads((results_dir / "index.json").read_text())
+        assert len(index) == 1
+
+    def test_different_stdout_is_new_record(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        results_dir = tmp_path / "results"
+        id1 = versioning.record_run(results_dir, "s", "print(42)", _make_result(stdout="42"), shared)
+        id2 = versioning.record_run(results_dir, "s", "print(42)", _make_result(stdout="43"), shared)
+        assert id1 != id2
+        assert len(json.loads((results_dir / "index.json").read_text())) == 2
+
+    def test_different_code_is_new_record(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        results_dir = tmp_path / "results"
+        id1 = versioning.record_run(results_dir, "s", "print(1)", _make_result(stdout="1"), shared)
+        id2 = versioning.record_run(results_dir, "s", "print(2)", _make_result(stdout="1"), shared)
+        assert id1 != id2
+
+
+class TestVersioningSessionGrouping:
+    def test_session_id_stored_in_record(self, tmp_path):
+        result = _make_result()
+        run_id = versioning.record_run(tmp_path / "results", "my-session", "pass", result, tmp_path / "shared")
+        record = json.loads((tmp_path / "results" / run_id / "record.json").read_text())
+        assert record["session_id"] == "my-session"
+
+    def test_different_sessions_tracked_separately(self, tmp_path):
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        results_dir = tmp_path / "results"
+        versioning.record_run(results_dir, "sess-A", "print(1)", _make_result(stdout="1"), shared)
+        versioning.record_run(results_dir, "sess-B", "print(2)", _make_result(stdout="2"), shared)
+        index = json.loads((results_dir / "index.json").read_text())
+        sessions = {e["session_id"] for e in index}
+        assert sessions == {"sess-A", "sess-B"}

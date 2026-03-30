@@ -1,11 +1,13 @@
 import json
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ValidationError
 
 from scratchpad.docker_backend import DockerScratchpad
+from scratchpad import versioning
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -17,9 +19,13 @@ mcp = FastMCP("Python Scratchpad")
 # Set up paths relative to this file
 BASE_DIR = Path(__file__).parent
 SHARED_DIR = BASE_DIR / "shared"
+RESULTS_DIR = BASE_DIR / "results"
 
 # Initialize the Docker backend
 scratchpad = DockerScratchpad(shared_dir=SHARED_DIR)
+
+# Session ID groups all run_code calls until reset_session is called
+_session_id: str = str(uuid4())
 
 
 class RunCodeParams(BaseModel):
@@ -79,6 +85,11 @@ async def run_code(code: str, timeout: int = 30) -> str:
 
     result = await scratchpad.execute(params.code, timeout=params.timeout)
 
+    try:
+        versioning.record_run(RESULTS_DIR, _session_id, params.code, result, SHARED_DIR)
+    except Exception as e:
+        logger.warning("Failed to record run: %s", e)
+
     parts = []
     if result.stdout:
         parts.append(f"stdout:\n{result.stdout}")
@@ -103,7 +114,9 @@ async def reset_session() -> str:
 
     Use this to start fresh if the namespace is cluttered or in a bad state.
     """
+    global _session_id
     await scratchpad.reset_session()
+    _session_id = str(uuid4())
     return "Session reset. All variables and state have been cleared."
 
 
