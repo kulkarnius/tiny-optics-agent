@@ -158,7 +158,7 @@ ax2.legend(fontsize=9)
 ax2.grid(alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('/shared/caustic_lens_scan.png', dpi=150, bbox_inches='tight')
+plt.savefig('shared/caustic_lens_scan.png', dpi=150, bbox_inches='tight')
 plt.show()
 print(f"\nFigure saved: caustic_lens_scan.png")
 print(f"Focus at lens position d = {d_focus*1e3:.1f} mm from camera")
@@ -228,28 +228,37 @@ axes[0].legend(fontsize=8)
 axes[0].grid(alpha=0.3)
 
 # ── Error summary bar chart ───────────────────────────────────────────────────
+# results tuple layout: (M2_true, M2_fit, w0_fit, z0_fit)
+#   index 0 = M2_true
+#   index 1 = M2_fit   (recovered beam quality factor)
+#   index 2 = w0_fit   (recovered waist in metres)
+#   index 3 = z0_fit   (recovered waist position in metres)
 if results:
     ax2 = axes[1]
     m2_true = [r[0] for r in results]
-    m2_fit  = [r[2] for r in results]   # Note: index 2 is M2_fit in popt
-    m2_rec  = [r[1] for r in results]
-    errs    = [abs(rec - tr)/tr * 100 for rec, tr in zip(m2_rec, m2_true)]
-    ax2.bar([str(t) for t in m2_true], errs, color=colors[:len(results)])
-    ax2.axhline(3, color='gray', ls='--', lw=1, label='3% target accuracy')
+    m2_rec  = [r[1] for r in results]   # index 1 = M2_fit
+    errs    = [abs(rec - tr) / tr * 100 for rec, tr in zip(m2_rec, m2_true)]
+    bars = ax2.bar([str(t) for t in m2_true], errs, color=colors[:len(results)],
+                   width=0.5, zorder=3)
+    ax2.axhline(3, color='gray', ls='--', lw=1.5, label='3% target accuracy')
     ax2.set_xlabel('True M²', fontsize=11)
     ax2.set_ylabel('Relative error in M² [%]', fontsize=11)
     ax2.set_title('Fit Accuracy by M² Value', fontsize=11)
     ax2.legend(fontsize=10)
-    ax2.grid(alpha=0.3, axis='y')
+    ax2.grid(alpha=0.3, axis='y', zorder=0)
+    # Always show at least 0–5% on y-axis so bars are visible even when error < 0.1%
+    max_err = max(errs) if errs else 1.0
+    ax2.set_ylim(0, max(max_err * 1.4, 5.0))
     for i, (tr, rec, err) in enumerate(zip(m2_true, m2_rec, errs)):
-        ax2.text(i, err + 0.1, f'{rec:.2f}', ha='center', fontsize=10)
+        ax2.text(i, err + max(max_err * 0.04, 0.1),
+                 f'recovered:\n{rec:.3f}', ha='center', fontsize=9)
 
 plt.tight_layout()
-plt.savefig('/shared/M2_hyperbolic_fit.png', dpi=150, bbox_inches='tight')
+plt.savefig('shared/M2_hyperbolic_fit.png', dpi=150, bbox_inches='tight')
 plt.show()
 print("Figure saved: M2_hyperbolic_fit.png")
 for r in results:
-    print(f"  M²_true={r[0]:.1f}  →  M²_recovered={r[1]:.3f},  w0={r[2]*1e6:.2f}µm,  z0={r[3]*1e3:.2f}mm")
+    print(f"  M²_true={r[0]:.1f}  →  M²_fit={r[1]:.4f},  w0={r[2]*1e6:.2f}µm,  z0={r[3]*1e3:.2f}mm")
 
 
 # =============================================================================
@@ -350,7 +359,7 @@ for col, (d_pos, label) in enumerate(zip(positions, pos_labels)):
     ax_prof.set_ylim(-0.1, 1.2)
 
 plt.tight_layout()
-plt.savefig('/shared/ccd_images_three_positions.png', dpi=150, bbox_inches='tight')
+plt.savefig('shared/ccd_images_three_positions.png', dpi=150, bbox_inches='tight')
 plt.show()
 print("Figure saved: ccd_images_three_positions.png")
 
@@ -427,7 +436,7 @@ ax2.legend(fontsize=9)
 ax2.grid(alpha=0.3)
 
 plt.tight_layout()
-plt.savefig('/shared/two_branch_inversion.png', dpi=150, bbox_inches='tight')
+plt.savefig('shared/two_branch_inversion.png', dpi=150, bbox_inches='tight')
 plt.show()
 
 # ── Numerical check at specific positions ─────────────────────────────────────
@@ -494,11 +503,11 @@ ax.legend(fontsize=10)
 ax.grid(alpha=0.3)
 ax.set_xlim(3, 31)
 plt.tight_layout()
-plt.savefig('/shared/iso11146_sampling_sensitivity.png', dpi=150, bbox_inches='tight')
+plt.savefig('shared/iso11146_sampling_sensitivity.png', dpi=150, bbox_inches='tight')
 plt.show()
 print("Figure saved: iso11146_sampling_sensitivity.png")
 
-print("\n=== All blocks complete. Expected figures in /shared/: ===")
+print("\n=== All blocks complete. Expected figures in shared/: ===")
 for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
           'ccd_images_three_positions.png', 'two_branch_inversion.png',
           'iso11146_sampling_sensitivity.png']:
@@ -581,7 +590,7 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 # find a directory results/<run_id>/ containing:
 #   - record.json with: user_query, code, stdout, figures list, rag_citations,
 #     model_params (lambda_m, f_lens, W_in, M2 values, noise_rms)
-#   - The figure .png files copied from /shared/
+#   - The figure .png files copied from shared/
 #   - SUMMARY.md (if enabled)
 #
 # WHAT VALIDATES THE CHAIN:
@@ -603,8 +612,8 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 #          "Please re-read the search_documents result from earlier and include
 #          those citations in the save_result call."
 #
-# Problem: Figures are not appearing in /shared/.
-# Fix:     Confirm the scratchpad Docker container has /shared/ mounted. Check
+# Problem: Figures are not appearing in shared/.
+# Fix:     Confirm the scratchpad Docker container has shared/ mounted. Check
 #          list_figures() output after Block 1 completes.
 #
 # Problem: 2D Gaussian fit fails in Block 3 (RuntimeError).
@@ -618,4 +627,3 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 #   Figure saved: caustic_lens_scan.png
 #   Focus at lens position d = 100.0 mm from camera
 #   Minimum spot on CCD: w0' = 4.69 µm
-
