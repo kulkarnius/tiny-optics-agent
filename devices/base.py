@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from enum import Enum
 from abc import ABC
 
@@ -9,6 +9,7 @@ class Status(str, Enum):
 
 class DeviceState(BaseModel):
     """Base state that all devices share."""
+    model_config = ConfigDict(validate_assignment=True)
     status: Status = Status.IDLE
 
 class BaseDevice(ABC):

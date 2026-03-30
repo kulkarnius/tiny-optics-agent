@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field, ValidationError
 
 from scratchpad.docker_backend import DockerScratchpad
 
@@ -19,6 +20,11 @@ SHARED_DIR = BASE_DIR / "shared"
 
 # Initialize the Docker backend
 scratchpad = DockerScratchpad(shared_dir=SHARED_DIR)
+
+
+class RunCodeParams(BaseModel):
+    code: str = Field(min_length=1, description="Python code to execute")
+    timeout: int = Field(default=30, ge=1, le=120, description="Max execution time in seconds (1-120)")
 
 
 # ==========================================
@@ -66,10 +72,12 @@ async def run_code(code: str, timeout: int = 30) -> str:
         code: Python code to execute. Can reference variables from previous calls.
         timeout: Maximum execution time in seconds (default 30, max 120).
     """
-    if timeout > 120:
-        return "Error: timeout must not exceed 120 seconds."
+    try:
+        params = RunCodeParams(code=code, timeout=timeout)
+    except ValidationError as e:
+        return f"Invalid parameters:\n{e}"
 
-    result = await scratchpad.execute(code, timeout=timeout)
+    result = await scratchpad.execute(params.code, timeout=params.timeout)
 
     parts = []
     if result.stdout:
