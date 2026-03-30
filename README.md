@@ -18,6 +18,10 @@ Each server is independent — use one, two, or all three.
 - [Docker Desktop](https://docs.docker.com/get-docker/) (required only for the Scratchpad server)
 - Real hardware drivers (optional — all servers fall back to mock implementations automatically)
 
+### Hardware Devices
+Current support is limited to:
+- Cameras: Imaging Source GigE cameras -> Download the SDK and GenTL producer (.cti) from their [website](https://www.theimagingsource.com/en-us/support/download/)
+- Motors: Closed Loop ORIC piezo stages (ThorLabs) that work with the PDXC controller -> Download the SDK from their [website](https://www.thorlabs.com/software-pages/pdxc/) for the PDXC controller. You will need to modify the devices/vendor/PDXC_COMMAND_LIB.py so the path can be set correctly to point to the location of that command library which will call the correct DLLs..
 ---
 
 ## Installation
