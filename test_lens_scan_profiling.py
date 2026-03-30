@@ -29,11 +29,9 @@ System Prompt
 -------------
 You are a laser optics research assistant. Before performing any calculation, you
 MUST call search_documents to retrieve relevant equations and parameters from the
-paper index. Ground all equations in the retrieved paper chunks. After every
-run_code call that produces quantitative output or figures, you MUST call
-save_result, passing: the original user query, all RAG citations used
-(source_file, section_hierarchy, chunk_text, relevance_score), and any named
-physical constants or model parameters used. Do not skip save_result.
+paper index. Ground all equations in the retrieved paper chunks. When citing
+results, include the source_file, section_hierarchy, and relevance_score from
+the search_documents output.
 
 User Queries (send these to Claude in order)
 --------------------------------------------
@@ -542,14 +540,13 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 #   a) Call search_documents("Gaussian beam lens scan CCD spot size") — it should
 #      return chunks from Section 4 (Moving-Lens Scan) and Section 2 (propagation).
 #   b) Call run_code with the code from BLOCK 1.
-#   c) Call save_result with citations pointing to the correct sections.
 #
 # WHAT TO CHECK after Q1:
 #   - The plot shows a hyperbolic caustic with minimum at d = 100 mm from camera.
 #   - w0' printed to console matches the analytic value ~4.69 µm (He-Ne at 632 nm,
 #     f = 100 mm, W_in = 4.3 mm).
-#   - save_result is called with source_file = "gaussian_beam_lens_scan.md" and
-#     section_hierarchy containing "Moving-Lens Scan Methodology".
+#   - search_documents results reference source_file = "gaussian_beam_lens_scan.md"
+#     with section_hierarchy containing "Moving-Lens Scan Methodology".
 #
 # STEP 5 — SEND QUERY 2
 # -----------------------
@@ -557,7 +554,7 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 # for M² = 1.0, 1.3, 1.8. Check:
 #   - Recovered M² values are within ~5% of true values.
 #   - The bar chart shows error <3% for M² = 1.0 and rising for higher M².
-#   - save_result citations include Section 4.2 (Fitting Procedure) and Eq. 17.
+#   - search_documents citations include Section 4.2 (Fitting Procedure) and Eq. 17.
 #
 # STEP 6 — SEND QUERY 3
 # -----------------------
@@ -565,7 +562,7 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 #   - Three CCD images are produced (dark wide ring before focus, tight bright
 #     spot at focus, spreading ring after focus).
 #   - 2D Gaussian fit extracts w_x, w_y within ~2% of the true spot size.
-#   - save_result citations include Section 5 (CCD Camera Spot Size Extraction)
+#   - search_documents citations include Section 5 (CCD Camera Spot Size Extraction)
 #     and Eq. 18 (2D Gaussian fit model).
 #
 # STEP 7 — SEND QUERY 4
@@ -574,7 +571,7 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 #   - w0_+ (Eq. 12) returns the true w0 for z < z_R and diverges for z > z_R.
 #   - w0_- (Eq. 13) returns the true w0 for z > z_R and diverges for z < z_R.
 #   - The printed table shows correct branch switching at z = z_R.
-#   - save_result citations include Section 3.3 (Choosing the Correct Branch)
+#   - search_documents citations include Section 3.3 (Choosing the Correct Branch)
 #     and Eqs. 12-13.
 #
 # STEP 8 — SEND QUERY 5
@@ -582,23 +579,23 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 # Send Q5. Claude should run BLOCK 5. Check:
 #   - M² error > 10% for N < 6 measurement points.
 #   - M² error drops below 3% at N ≥ 10, consistent with ISO 11146 minimum.
-#   - save_result citations include Section 4.3 (ISO 11146 Sampling Requirements).
+#   - search_documents citations include Section 4.3 (ISO 11146 Sampling Requirements).
 #
 # STEP 9 — VALIDATE PROVENANCE
 # -----------------------------
 # After all five queries, inspect the results/ directory. For each run you should
 # find a directory results/<run_id>/ containing:
-#   - record.json with: user_query, code, stdout, figures list, rag_citations,
-#     model_params (lambda_m, f_lens, W_in, M2 values, noise_rms)
+#   - record.json with: schema_version, run_id, session_id, code, stdout, stderr,
+#     error, success, timestamp, content_hash, figures (list of {filename, sha256,
+#     size_bytes} dicts)
 #   - The figure .png files copied from shared/
-#   - SUMMARY.md (if enabled)
 #
 # WHAT VALIDATES THE CHAIN:
-#   ✓ RAG citations reference the correct section headings from the .md paper
-#   ✓ model_params includes lambda_m = 632.8e-9, f_lens = 0.1, W_in = 4.3e-3
-#   ✓ All five figures appear in results/<run_id>/
-#   ✓ query_results("lens scan M2") returns all five runs
-#   ✓ reproduce_run(<run_id>) re-executes Block 1 and produces consistent output
+#   ✓ results/index.json lists all runs newest-first with run_id, session_id,
+#     success, timestamp, and content_hash
+#   ✓ All five figures appear in results/<run_id>/ alongside record.json
+#   ✓ record.json success == true for all five blocks
+#   ✓ record.json stdout contains the expected printed values (e.g. w0' = 4.69 µm)
 #
 # TROUBLESHOOTING
 # ----------------
@@ -607,10 +604,9 @@ for f in ['caustic_lens_scan.png', 'M2_hyperbolic_fit.png',
 #          "Before writing any code, confirm which paper section you are using
 #          and cite it explicitly."
 #
-# Problem: save_result is called but rag_citations list is empty.
-# Fix:     Claude lost the citation context between tool calls. Ask it explicitly:
-#          "Please re-read the search_documents result from earlier and include
-#          those citations in the save_result call."
+# Problem: Claude doesn't cite paper sections in its response.
+# Fix:     Ask explicitly: "Please re-read the search_documents result from
+#          earlier and quote the section heading and equation numbers you used."
 #
 # Problem: Figures are not appearing in shared/.
 # Fix:     Confirm the scratchpad Docker container has shared/ mounted. Check
