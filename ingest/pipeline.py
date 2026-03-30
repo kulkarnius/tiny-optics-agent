@@ -24,8 +24,8 @@ def is_pipeline_running() -> bool:
         pid = int(PID_FILE.read_text().strip())
         os.kill(pid, 0)  # signal 0: check existence only, does not kill
         return True
-    except (ProcessLookupError, PermissionError, ValueError):
-        return False  # stale PID file from a crash
+    except (OSError, ValueError):
+        return False  # stale PID file from a crash (OSError covers Windows WinError 87)
 
 
 def _pdf_sha256(pdf_path: Path) -> str:
@@ -133,7 +133,7 @@ class IngestPipeline:
             out_path.write_text(f"{front_matter}\n\n{body}", encoding="utf-8")
             logger.info(f"Wrote '{out_path.name}' (converter={converter_used})")
 
-            if not meta.doi and not meta.arxiv_id:
+            if outcome == "SUCCESS" and not meta.doi and not meta.arxiv_id:
                 outcome = "METADATA_PARTIAL"
 
             # Sync RAG index
