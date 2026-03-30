@@ -16,16 +16,31 @@ _HASHES_FILE = "processed_hashes.json"
 PID_FILE = Path("ingest.pid")
 
 
+def _pid_exists(pid: int) -> bool:
+    """Return True if the given PID belongs to a running process."""
+    import sys
+    if sys.platform == "win32":
+        import ctypes
+        SYNCHRONIZE = 0x00100000
+        handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        if handle == 0:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    else:
+        os.kill(pid, 0)  # signal 0: check existence only, does not kill on Unix
+        return True
+
+
 def is_pipeline_running() -> bool:
     """Return True if the ingestion pipeline process is currently running."""
     if not PID_FILE.exists():
         return False
     try:
         pid = int(PID_FILE.read_text().strip())
-        os.kill(pid, 0)  # signal 0: check existence only, does not kill
-        return True
+        return _pid_exists(pid)
     except (OSError, ValueError):
-        return False  # stale PID file from a crash (OSError covers Windows WinError 87)
+        return False  # stale PID file from a crash
 
 
 def _pdf_sha256(pdf_path: Path) -> str:
