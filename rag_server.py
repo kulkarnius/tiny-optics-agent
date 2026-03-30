@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field, ValidationError
 
 from rag.embedder import Embedder
 from rag.index import RAGIndex
@@ -27,6 +28,20 @@ logger.info("Embedding model loaded.")
 index = RAGIndex(docs_dir=DOCS_DIR, data_dir=DATA_DIR, embedder=embedder)
 logger.info("Syncing document index...")
 index.sync()
+
+
+class SearchDocumentsParams(BaseModel):
+    query: str = Field(min_length=1, max_length=500, description="Search query")
+    top_k: int = Field(default=5, ge=1, le=50, description="Number of results (1-50)")
+
+
+class GetFullSectionParams(BaseModel):
+    source_file: str = Field(
+        min_length=1,
+        pattern=r"^[^/\\]+\.md$",
+        description="Markdown filename (e.g. 'optics.md'). Must not contain path separators.",
+    )
+    section_heading: str = Field(min_length=1, max_length=200, description="Heading text to retrieve")
 
 
 # ==========================================
@@ -56,7 +71,12 @@ def search_documents(query: str, top_k: int = 5) -> str:
         query: The search query. Can be a question, keyword, or description of what you're looking for.
         top_k: Number of results to return (default 5).
     """
-    results = index.search(query, top_k=top_k)
+    try:
+        params = SearchDocumentsParams(query=query, top_k=top_k)
+    except ValidationError as e:
+        return f"Invalid parameters:\n{e}"
+
+    results = index.search(params.query, top_k=params.top_k)
 
     if not results:
         return "No results found. The document index may be empty — check that markdown files exist in the documents/ directory."
@@ -88,12 +108,17 @@ def get_full_section(source_file: str, section_heading: str) -> str:
         source_file: The filename (e.g., "optics.md") from a search result.
         section_heading: The section heading text to retrieve (partial match supported).
     """
-    section = index.get_section(source_file, section_heading)
+    try:
+        params = GetFullSectionParams(source_file=source_file, section_heading=section_heading)
+    except ValidationError as e:
+        return f"Invalid parameters:\n{e}"
+
+    section = index.get_section(params.source_file, params.section_heading)
 
     if section is None:
-        return f"Section '{section_heading}' not found in '{source_file}'. Check the document list for available headings."
+        return f"Section '{params.section_heading}' not found in '{params.source_file}'. Check the document list for available headings."
 
-    return f"=== Full Section from {source_file} ===\n{section}\n==="
+    return f"=== Full Section from {params.source_file} ===\n{section}\n==="
 
 
 if __name__ == "__main__":

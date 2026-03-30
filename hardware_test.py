@@ -15,12 +15,15 @@ async def main():
         # This should succeed
         await motor.move_to(90.5)
         print(f"Motor State after valid move: {motor.get_state()}")
-        
-        # Uncommenting the next line would cause a Pydantic ValidationError
-        # await motor.move_to(400) 
-        
     except Exception as e:
         print(f"Motor Error: {e}")
+
+    print("\n--- Testing Motor Validation (out-of-range position) ---")
+    try:
+        await motor.move_to(400)  # 400 degrees exceeds the 0-360 Field constraint
+        print("ERROR: expected ValidationError but got none")
+    except Exception as e:
+        print(f"Caught expected validation error: {type(e).__name__}")
 
     print("\n--- Executing Camera Capture ---")
     filepath = await camera.capture()

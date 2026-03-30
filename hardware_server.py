@@ -5,6 +5,7 @@ import json
 import signal
 import sys
 from mcp.server.fastmcp import FastMCP, Image
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -85,6 +86,14 @@ else:  # auto
         camera = MockCamera()
         logger.info("Mock camera initialized.")
 
+class MoveMotorParams(BaseModel):
+    target_position: float = Field(description="Absolute target position (degrees 0-360 for mock, mm for PDXC)")
+
+
+class ConfigureCameraParams(BaseModel):
+    exposure_ms: int = Field(ge=1, le=2000, description="Exposure time in milliseconds (1-2000)")
+
+
 # ==========================================
 # RESOURCES (Data the LLM can read)
 # ==========================================
@@ -128,9 +137,14 @@ async def move_motor(target_position: float) -> str:
         target_position: The target position in mm (for PDXC) or degrees (0-360) for mock motor.
     """
     try:
-        final_pos = await motor.move_to(target_position)
+        params = MoveMotorParams(target_position=target_position)
+    except ValidationError as e:
+        return f"Invalid parameters:\n{e}"
+
+    try:
+        final_pos = await motor.move_to(params.target_position)
         return f"Success: Motor movement completed. Current position is {final_pos}."
-    except Exception as e:
+    except (ValidationError, Exception) as e:
         return f"Error: {e}"
 
 
@@ -159,11 +173,16 @@ async def configure_camera(exposure_ms: int) -> str:
         exposure_ms: Exposure time in milliseconds.
                      Use 10-100 for well-lit/motion scenes, 100-500 for low light.
     """
-    if not (1 <= exposure_ms <= 2000):
-         return "Error: exposure_ms out of bounds. Must be 1-2000."
+    try:
+        params = ConfigureCameraParams(exposure_ms=exposure_ms)
+    except ValidationError as e:
+        return f"Invalid parameters:\n{e}"
 
-    camera.state.exposure = exposure_ms
-    return f"Success: Camera exposure updated to {exposure_ms}ms."
+    try:
+        camera.state.exposure = params.exposure_ms
+    except ValidationError as e:
+        return f"Error setting exposure: {e}"
+    return f"Success: Camera exposure updated to {params.exposure_ms}ms."
 
 @mcp.tool()
 async def capture_image() -> str:
