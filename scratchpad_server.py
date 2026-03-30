@@ -37,7 +37,8 @@ class RunCodeParams(BaseModel):
 # RESOURCES (Data the LLM can read)
 # ==========================================
 
-@mcp.resource("scratchpad://status")
+#@mcp.resource("scratchpad://status")
+@mcp.tool()
 async def get_status() -> str:
     """Returns JSON status of the scratchpad: container state, session info, and saved figures."""
     container_running = await scratchpad._is_container_running()

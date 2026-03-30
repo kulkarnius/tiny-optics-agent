@@ -58,7 +58,8 @@ class GetFullSectionParams(BaseModel):
 # RESOURCES
 # ==========================================
 
-@mcp.resource("rag://document-list")
+#@mcp.resource("rag://document-list")
+@mcp.tool()
 def list_documents() -> str:
     """Returns a JSON list of all indexed documents with their heading outlines."""
     docs = index.list_documents()
