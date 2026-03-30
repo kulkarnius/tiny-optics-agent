@@ -25,15 +25,16 @@ def _init_namespace():
         "import matplotlib.pyplot as plt\n",
         ns,
     )
+
     return ns
 
 
 def _get_shared_images():
-    """Return set of image files currently in /shared."""
+    """Return set of full /shared/ paths for image files currently in /shared."""
     exts = {".png", ".jpg", ".jpeg", ".svg", ".pdf"}
     try:
         return {
-            f for f in os.listdir("/shared")
+            f"/shared/{f}" for f in os.listdir("/shared")
             if os.path.splitext(f)[1].lower() in exts
         }
     except OSError:
@@ -74,6 +75,15 @@ def execute(code, namespace, timeout):
         success = False
     except Exception:
         error = traceback.format_exc()
+        # Augment FileNotFoundError on non-/shared/ paths with actionable guidance
+        if "FileNotFoundError" in error and "/shared/" not in error:
+            import re as _re
+            m = _re.search(r"No such file or directory: '([^']+)'", error)
+            if m and not m.group(1).startswith("/shared/"):
+                error += (
+                    "\nNote: the scratchpad sandbox only allows writing to /shared/. "
+                    "Use plt.savefig('/shared/name.png') or cv2.imwrite('/shared/name.png', img)."
+                )
         success = False
     finally:
         signal.alarm(0)
@@ -93,7 +103,7 @@ def execute(code, namespace, timeout):
                 fname = f"figure_{ts}_{i + 1}.png"
                 fpath = f"/shared/{fname}"
                 fig.savefig(fpath, dpi=150, bbox_inches="tight")
-                figures_saved.append(fname)
+                figures_saved.append(fpath)
             plt.close("all")
     except Exception as e:
         print(f"Warning: failed to auto-save figures: {e}", file=sys.stderr)

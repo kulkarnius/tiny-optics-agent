@@ -152,7 +152,9 @@ class TestPlots:
         ))
         assert result.success
         assert len(result.figures) > 0
-        fig_path = scratchpad.shared_dir / result.figures[0]
+        # figures now contain full /shared/ paths
+        fig_name = Path(result.figures[0]).name
+        fig_path = scratchpad.shared_dir / fig_name
         assert fig_path.exists()
         assert fig_path.stat().st_size > 0
 
@@ -404,3 +406,125 @@ class TestVersioningSessionGrouping:
         index = json.loads((results_dir / "index.json").read_text())
         sessions = {e["session_id"] for e in index}
         assert sessions == {"sess-A", "sess-B"}
+
+
+# ==========================================
+# TC-1-xx: File output path documentation and error handling
+# ==========================================
+
+class TestFileOutputPath:
+    def test_savefig_wrong_path_raises_helpful_error(self, scratchpad, event_loop):
+        """TC-1-02: plt.savefig to unsupported path raises FileNotFoundError mentioning /shared/."""
+        result = run(event_loop, scratchpad.execute(
+            "plt.savefig('/home/claude/test.png')"
+        ))
+        assert not result.success
+        assert result.error is not None
+        assert "/shared/" in result.error
+
+    def test_tool_description_documents_shared_path(self):
+        """TC-1-04: run_code docstring documents /shared/ as canonical path and mentions present_files."""
+        import scratchpad_server
+        doc = scratchpad_server.run_code.__doc__
+        assert "/shared/" in doc
+        assert "present_files" in doc
+
+
+# ==========================================
+# TC-2-xx: figures_saved in run_code result envelope
+# ==========================================
+
+class TestFiguresSavedInResult:
+    def test_autosave_path_in_result(self, scratchpad, event_loop):
+        """TC-2-01: Auto-named figure path is included in result.figures with full /shared/ prefix."""
+        result = run(event_loop, scratchpad.execute(
+            "plt.plot([1, 2, 3])\n"
+            "plt.show()"
+        ))
+        assert result.success
+        assert len(result.figures) > 0
+        assert all(f.startswith("/shared/") for f in result.figures)
+
+    def test_named_savefig_path_in_result(self, scratchpad, event_loop):
+        """TC-2-02: Explicit plt.savefig path is echoed in result.figures; no list_figures call needed."""
+        result = run(event_loop, scratchpad.execute(
+            "plt.savefig('/shared/named.png')\n"
+            "plt.close()"
+        ))
+        assert result.success
+        assert "/shared/named.png" in result.figures
+
+    def test_multiple_figures_in_one_call(self, scratchpad, event_loop):
+        """TC-2-03: Two figures created in one execution produce two entries in result.figures."""
+        result = run(event_loop, scratchpad.execute(
+            "import matplotlib.pyplot as plt\n"
+            "fig1 = plt.figure()\n"
+            "plt.plot([1, 2])\n"
+            "fig2 = plt.figure()\n"
+            "plt.plot([3, 4])\n"
+        ))
+        assert result.success
+        assert len(result.figures) == 2
+        assert all(f.startswith("/shared/") for f in result.figures)
+
+    def test_cv2_imwrite_path_in_result(self, scratchpad, event_loop):
+        """TC-2-04: cv2.imwrite path appears in result.figures."""
+        result = run(event_loop, scratchpad.execute(
+            "import numpy as np\n"
+            "import cv2\n"
+            "arr = np.zeros((50, 50, 3), dtype=np.uint8)\n"
+            "cv2.imwrite('/shared/cv_out.png', arr)"
+        ))
+        assert result.success
+        assert "/shared/cv_out.png" in result.figures
+
+    def test_no_figures_returns_empty_list(self, scratchpad, event_loop):
+        """TC-2-06: Code with no plot or imwrite calls produces an empty figures list, not None."""
+        result = run(event_loop, scratchpad.execute("x = 1 + 1"))
+        assert result.success
+        assert result.figures == []
+
+
+# ==========================================
+# TC-4-xx: Session persistence semantics
+# ==========================================
+
+class TestSessionPersistence:
+    def test_import_persists_across_calls(self, scratchpad, event_loop):
+        """TC-4-02: An import in call 1 is available in call 2."""
+        r1 = run(event_loop, scratchpad.execute("import numpy as np"))
+        assert r1.success
+
+        r2 = run(event_loop, scratchpad.execute("print(np.pi)"))
+        assert r2.success
+        assert "3.14159" in r2.stdout
+
+    def test_exception_does_not_clear_prior_names(self, scratchpad, event_loop):
+        """TC-4-03: An exception in call 2 does not wipe names defined in call 1."""
+        r1 = run(event_loop, scratchpad.execute("y = 99"))
+        assert r1.success
+
+        r2 = run(event_loop, scratchpad.execute("raise ValueError('oops')"))
+        assert not r2.success
+
+        r3 = run(event_loop, scratchpad.execute("print(y)"))
+        assert r3.success
+        assert "99" in r3.stdout
+
+    def test_partial_execution_retains_pre_error_names(self, scratchpad, event_loop):
+        """TC-4-04: Names bound before the failing line are retained; names after are not."""
+        r1 = run(event_loop, scratchpad.execute(
+            "a = 1\n"
+            "b = 2\n"
+            "raise RuntimeError('stop here')\n"
+            "c = 3\n"
+        ))
+        assert not r1.success
+
+        r2 = run(event_loop, scratchpad.execute("print(a + b)"))
+        assert r2.success
+        assert "3" in r2.stdout
+
+        r3 = run(event_loop, scratchpad.execute("print(c)"))
+        assert not r3.success
+        assert "NameError" in r3.error
