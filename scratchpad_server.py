@@ -26,6 +26,9 @@ scratchpad = DockerScratchpad(shared_dir=SHARED_DIR)
 
 # Session ID groups all run_code calls until reset_session is called
 _session_id: str = str(uuid4())
+# Reset the executor namespace on the first run_code call after server start,
+# so each server process begins with a clean slate matching the new session ID.
+_first_run: bool = True
 
 
 class RunCodeParams(BaseModel):
@@ -99,6 +102,12 @@ async def run_code(code: str, timeout: int = 30) -> str:
         code: Python code to execute. Can reference variables from previous calls.
         timeout: Maximum execution time in seconds (default 30, max 120).
     """
+    global _first_run, _session_id
+    if _first_run:
+        _first_run = False
+        await scratchpad.reset_session()
+        _session_id = str(uuid4())
+
     try:
         params = RunCodeParams(code=code, timeout=timeout)
     except ValidationError as e:
