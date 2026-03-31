@@ -11,14 +11,20 @@ _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 class CameraState(DeviceState):
     exposure: int = Field(default=100, ge=1, le=2000)
     last_image_path: Optional[str] = None
+    um_per_pixel: Optional[float] = Field(
+        default=None,
+        description="Microns per pixel at the sample plane. None if uncalibrated.",
+    )
 
 class MockCamera(BaseDevice):
     def __init__(self, data_dir=_DEFAULT_DATA_DIR):
         super().__init__()
-        self.state = CameraState()
+        um_per_pixel_env = os.environ.get("CAMERA_UM_PER_PIXEL")
+        um_per_pixel = float(um_per_pixel_env) if um_per_pixel_env is not None else None
+        self.state = CameraState(um_per_pixel=um_per_pixel)
         self.data_dir = data_dir
         self._capture_count = 0
-        
+
         # Ensure the data directory exists
         os.makedirs(self.data_dir, exist_ok=True)
 

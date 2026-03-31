@@ -14,6 +14,10 @@ _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 class ImagingSourceCameraState(DeviceState):
     exposure: int = Field(default=100, ge=1, le=2000)
     last_image_path: Optional[str] = None
+    um_per_pixel: Optional[float] = Field(
+        default=None,
+        description="Microns per pixel at the sample plane. None if uncalibrated.",
+    )
 
 
 class ImagingSourceCamera(BaseDevice):
@@ -26,7 +30,9 @@ class ImagingSourceCamera(BaseDevice):
             data_dir:      Directory where captured images are saved.
         """
         super().__init__()
-        self.state = ImagingSourceCameraState()
+        um_per_pixel_env = os.environ.get("CAMERA_UM_PER_PIXEL")
+        um_per_pixel = float(um_per_pixel_env) if um_per_pixel_env is not None else None
+        self.state = ImagingSourceCameraState(um_per_pixel=um_per_pixel)
         self.serial_number = serial_number
         self.cti_path = cti_path
         self.data_dir = data_dir
