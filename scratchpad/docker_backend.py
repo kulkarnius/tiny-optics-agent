@@ -97,6 +97,32 @@ class DockerScratchpad:
             )
         logger.info("Container '%s' started.", self.container_name)
 
+    async def _kill_container_executors(self) -> None:
+        """Kill any lingering executor.py processes inside the container.
+
+        Killing the host-side docker exec process does NOT immediately kill
+        the container-side Python process — it stays alive (blocked on imports
+        or I/O) until it tries to read EOF on stdin.  After many reset_session
+        calls these orphaned processes accumulate and starve the real executor.
+        """
+        kill_script = (
+            "import os, signal\n"
+            "for pid in os.listdir('/proc'):\n"
+            "    if not pid.isdigit(): continue\n"
+            "    try:\n"
+            "        with open(f'/proc/{pid}/cmdline', 'rb') as f: c = f.read()\n"
+            "        if b'executor.py' in c and int(pid) != os.getpid():\n"
+            "            os.kill(int(pid), signal.SIGKILL)\n"
+            "    except OSError: pass\n"
+        )
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "exec", self.container_name,
+            "python", "-c", kill_script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+
     async def _start_executor(self) -> None:
         """Start the persistent executor process via docker exec."""
         logger.info("Starting executor process...")
@@ -107,8 +133,26 @@ class DockerScratchpad:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        # Wait briefly for the executor to initialize
-        await asyncio.sleep(0.5)
+
+        # Wait for the executor to signal readiness ("READY\n") instead of a
+        # fixed sleep.  This handles slow container starts (e.g. font-cache
+        # rebuild on a read-only filesystem) without an arbitrary timeout.
+        try:
+            ready_line = await asyncio.wait_for(
+                self._process.stdout.readline(),
+                timeout=60,
+            )
+        except asyncio.TimeoutError:
+            self._process.kill()
+            await self._process.wait()
+            raise RuntimeError("Executor did not become ready within 60 s")
+
+        if not ready_line or ready_line.strip() != b"READY":
+            self._process.kill()
+            await self._process.wait()
+            raise RuntimeError(
+                f"Unexpected executor startup message: {ready_line!r}"
+            )
 
         if self._process.returncode is not None:
             stderr = await self._process.stderr.read()
@@ -124,12 +168,14 @@ class DockerScratchpad:
     async def ensure_running(self) -> None:
         """Ensure both container and executor are running."""
         if not await self._is_container_running():
-            # Remove stale container if it exists
-            await asyncio.create_subprocess_exec(
+            # Remove stale container if it exists (must await communicate so
+            # the rm completes before we try to start a new container)
+            rm_proc = await asyncio.create_subprocess_exec(
                 "docker", "rm", "-f", self.container_name,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
+            await rm_proc.communicate()
             await self._start_container()
 
         if not self._is_executor_alive():
@@ -194,6 +240,7 @@ class DockerScratchpad:
             self._process.kill()
             await self._process.wait()
         self._process = None
+        await self._kill_container_executors()
         await self._start_executor()
 
     async def reset_session(self) -> None:
@@ -203,6 +250,12 @@ class DockerScratchpad:
             self._process.kill()
             await self._process.wait()
         self._process = None
+
+        # Kill any lingering executor processes left inside the container from
+        # previous reset_session / _restart_executor calls.  Killing the
+        # host-side docker exec process does NOT immediately kill the
+        # container-side Python process, so these accumulate over time.
+        await self._kill_container_executors()
 
         # Clean up generated figures
         if self.shared_dir.exists():

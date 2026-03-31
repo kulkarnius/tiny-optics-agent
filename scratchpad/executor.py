@@ -134,6 +134,10 @@ def main():
     print("executor: namespace initialized, ready for commands", file=sys.stderr)
     sys.stderr.flush()
 
+    # Signal readiness to the host backend
+    sys.stdout.write("READY\n")
+    sys.stdout.flush()
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
