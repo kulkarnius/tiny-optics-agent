@@ -5,7 +5,7 @@ import json
 import signal
 import sys
 from mcp.server.fastmcp import FastMCP, Image
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -86,12 +86,6 @@ else:  # auto
         camera = MockCamera()
         logger.info("Mock camera initialized.")
 
-class MoveMotorParams(BaseModel):
-    target_position: float = Field(description="Absolute target position (degrees 0-360 for mock, mm for PDXC)")
-
-
-class ConfigureCameraParams(BaseModel):
-    exposure_ms: int = Field(ge=1, le=2000, description="Exposure time in milliseconds (1-2000)")
 
 
 # ==========================================
@@ -103,8 +97,18 @@ class ConfigureCameraParams(BaseModel):
 def get_inventory() -> str:
     """Returns a JSON snapshot of all hardware devices and their current states."""
     inventory = {
-        "motor": motor.get_state().model_dump(),
-        "camera": camera.get_state().model_dump()
+        "motor": {
+            **motor.get_state().model_dump(),
+            "position_min": motor.POSITION_MIN,
+            "position_max": motor.POSITION_MAX,
+            "position_units": motor.POSITION_UNITS,
+        },
+        "camera": {
+            **camera.get_state().model_dump(),
+            "exposure_min": camera.EXPOSURE_MIN,
+            "exposure_max": camera.EXPOSURE_MAX,
+            "exposure_units": camera.EXPOSURE_UNITS,
+        }
     }
     return json.dumps(inventory, indent=2)
 
@@ -134,16 +138,17 @@ async def move_motor(target_position: float) -> str:
     Moves the motor to an absolute target position.
 
     Args:
-        target_position: The target position in mm (for PDXC) or degrees (0-360) for mock motor.
+        target_position: Target position. Call get_inventory to see valid units and range.
     """
+    MoveParams = motor.make_move_params()
     try:
-        params = MoveMotorParams(target_position=target_position)
+        params = MoveParams(target_position=target_position)
     except ValidationError as e:
         return f"Invalid parameters:\n{e}"
 
     try:
         final_pos = await motor.move_to(params.target_position)
-        return f"Success: Motor movement completed. Current position is {final_pos}."
+        return f"Success: Motor movement completed. Current position is {final_pos} {motor.POSITION_UNITS}."
     except (ValidationError, Exception) as e:
         return f"Error: {e}"
 
@@ -173,8 +178,9 @@ async def configure_camera(exposure_ms: int) -> str:
         exposure_ms: Exposure time in milliseconds.
                      Use 10-100 for well-lit/motion scenes, 100-500 for low light.
     """
+    ConfigureParams = camera.make_configure_params()
     try:
-        params = ConfigureCameraParams(exposure_ms=exposure_ms)
+        params = ConfigureParams(exposure_ms=exposure_ms)
     except ValidationError as e:
         return f"Invalid parameters:\n{e}"
 
@@ -182,7 +188,7 @@ async def configure_camera(exposure_ms: int) -> str:
         camera.state.exposure = params.exposure_ms
     except ValidationError as e:
         return f"Error setting exposure: {e}"
-    return f"Success: Camera exposure updated to {params.exposure_ms}ms."
+    return f"Success: Camera exposure updated to {params.exposure_ms} {camera.EXPOSURE_UNITS}."
 
 @mcp.tool()
 async def capture_image() -> str:

@@ -6,7 +6,7 @@ from pathlib import Path
 from pydantic import Field
 from typing import Optional
 from harvesters.core import Harvester
-from .base import BaseDevice, DeviceState, Status
+from .base import BaseCamera, DeviceState, Status
 
 _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
@@ -20,7 +20,7 @@ class ImagingSourceCameraState(DeviceState):
     )
 
 
-class ImagingSourceCamera(BaseDevice):
+class ImagingSourceCamera(BaseCamera):
     def __init__(self, serial_number: str, cti_path: str, data_dir: str = _DEFAULT_DATA_DIR):
         """
         Args:

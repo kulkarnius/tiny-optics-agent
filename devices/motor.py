@@ -1,12 +1,16 @@
 from pydantic import Field
-from .base import BaseDevice, DeviceState, Status
+from typing import ClassVar
+from .base import BaseMotor, DeviceState, Status
 
 class MotorState(DeviceState):
     # Enforce constraints: position must be between 0 and 360
     position: float = Field(default=0.0, ge=0.0, le=360.0)
     speed: float = Field(default=10.0, ge=1.0, le=100.0)
 
-class MockMotor(BaseDevice):
+class MockMotor(BaseMotor):
+    POSITION_MIN: ClassVar[float] = 0.0
+    POSITION_MAX: ClassVar[float] = 360.0
+    POSITION_UNITS: ClassVar[str] = "degrees"
     def __init__(self):
         super().__init__()
         self.state = MotorState()
