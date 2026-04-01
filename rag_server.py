@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -12,32 +13,43 @@ from rag.index import RAGIndex
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Initialize the FastMCP server
-mcp = FastMCP("RAG Document Search")
-
 # Set up paths relative to this file
 BASE_DIR = Path(__file__).parent
 DOCS_DIR = BASE_DIR / "documents"
 DATA_DIR = BASE_DIR / "data"
 
-# Initialize RAG components
-logger.info("Loading embedding model...")
-embedder = Embedder()
-logger.info("Embedding model loaded.")
+# These are populated during lifespan startup, after the MCP initialize handshake
+embedder: Embedder | None = None
+index: RAGIndex | None = None
 
-index = RAGIndex(docs_dir=DOCS_DIR, data_dir=DATA_DIR, embedder=embedder)
-logger.info("Syncing document index...")
-index.sync()
 
-try:
-    from ingest.pipeline import is_pipeline_running
-    if not is_pipeline_running():
-        logger.warning(
-            "Ingestion pipeline is not running. PDFs dropped into drop/ will not be "
-            "processed until 'python ingest_pipeline.py' is started."
-        )
-except ImportError:
-    pass
+@asynccontextmanager
+async def lifespan(server):
+    global embedder, index
+
+    logger.info("Loading embedding model...")
+    embedder = Embedder()
+    logger.info("Embedding model loaded.")
+
+    index = RAGIndex(docs_dir=DOCS_DIR, data_dir=DATA_DIR, embedder=embedder)
+    logger.info("Syncing document index...")
+    index.sync()
+
+    try:
+        from ingest.pipeline import is_pipeline_running
+        if not is_pipeline_running():
+            logger.warning(
+                "Ingestion pipeline is not running. PDFs dropped into drop/ will not be "
+                "processed until 'python ingest_pipeline.py' is started."
+            )
+    except ImportError:
+        pass
+
+    yield
+
+
+# Initialize the FastMCP server
+mcp = FastMCP("RAG Document Search", lifespan=lifespan)
 
 
 class SearchDocumentsParams(BaseModel):
