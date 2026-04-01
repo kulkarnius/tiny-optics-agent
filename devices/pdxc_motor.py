@@ -2,7 +2,8 @@ import asyncio
 import time
 import logging
 from pydantic import Field
-from .base import BaseDevice, DeviceState, Status
+from typing import ClassVar
+from .base import BaseMotor, DeviceState, Status
 
 try:
     from .vendor.PDXC_COMMAND_LIB import pdxc
@@ -18,8 +19,13 @@ class PDXCMotorState(DeviceState):
     is_homed: bool = False
 
 
-class PDXCMotor(BaseDevice):
+class PDXCMotor(BaseMotor):
     """Thorlabs PDXC piezo motor controller — single device, closed-loop mode."""
+
+    # Adjust for your specific stage model. PD1: ±10 mm, PD2: ±12.5 mm.
+    POSITION_MIN: ClassVar[float] = -10.0
+    POSITION_MAX: ClassVar[float] = 10.0
+    POSITION_UNITS: ClassVar[str] = "mm"
 
     HOMING_TIMEOUT_S = 60
     HOMING_POLL_INTERVAL_S = 0.5

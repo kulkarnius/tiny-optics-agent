@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 from pydantic import Field
 from typing import Optional
-from .base import BaseDevice, DeviceState, Status
+from .base import BaseCamera, DeviceState, Status
 
 _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
@@ -16,7 +16,7 @@ class CameraState(DeviceState):
         description="Microns per pixel at the sample plane. None if uncalibrated.",
     )
 
-class MockCamera(BaseDevice):
+class MockCamera(BaseCamera):
     def __init__(self, data_dir=_DEFAULT_DATA_DIR):
         super().__init__()
         um_per_pixel_env = os.environ.get("CAMERA_UM_PER_PIXEL")
