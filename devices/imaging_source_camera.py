@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import cv2
 import numpy as np
@@ -7,6 +8,8 @@ from pydantic import Field
 from typing import Optional
 from harvesters.core import Harvester
 from .base import BaseCamera, DeviceState, Status
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
@@ -48,25 +51,34 @@ class ImagingSourceCamera(BaseCamera):
 
     def _do_capture(self) -> str:
         """Synchronous capture executed in a thread pool to avoid blocking the event loop."""
-        # Set exposure (GenICam ExposureTime node expects microseconds).
-        # ExposureAuto must be Off or the ExposureTime node is read-only.
-        node_map = self._ia.remote_device.node_map
-        node_map.ExposureAuto.value = "Off"
-        node_map.ExposureTime.value = float(self.state.exposure * 1000)
-
-        self._ia.start()
         try:
-            with self._ia.fetch(timeout=2.0) as buffer:
-                component = buffer.payload.components[0]
-                frame = np.array(component.data).reshape(component.height, component.width)
+            # Set exposure (GenICam ExposureTime node expects microseconds).
+            # ExposureAuto must be Off or the ExposureTime node is read-only.
+            node_map = self._ia.remote_device.node_map
+            logger.info("Setting ExposureAuto=Off, ExposureTime=%s µs", self.state.exposure * 1000)
+            node_map.ExposureAuto.value = "Off"
+            node_map.ExposureTime.value = float(self.state.exposure * 1000)
 
-                self._capture_count += 1
-                filename = f"capture_{self._capture_count:03d}.jpg"
-                filepath = os.path.join(self.data_dir, filename)
-                cv2.imwrite(filepath, frame)
-                return filepath
-        finally:
-            self._ia.stop()
+            logger.info("Starting image acquirer...")
+            self._ia.start()
+            try:
+                logger.info("Fetching frame (timeout=2.0s)...")
+                with self._ia.fetch(timeout=2.0) as buffer:
+                    component = buffer.payload.components[0]
+                    logger.info("Got frame: %sx%s", component.width, component.height)
+                    frame = np.array(component.data).reshape(component.height, component.width)
+
+                    self._capture_count += 1
+                    filename = f"capture_{self._capture_count:03d}.jpg"
+                    filepath = os.path.join(self.data_dir, filename)
+                    cv2.imwrite(filepath, frame)
+                    logger.info("Saved image to %s", filepath)
+                    return filepath
+            finally:
+                self._ia.stop()
+        except Exception as e:
+            logger.exception("_do_capture failed: %s: %r", type(e).__name__, e)
+            raise RuntimeError(f"{type(e).__name__}: {repr(e)}") from e
 
     async def capture(self) -> str:
         """Captures a frame from the camera and saves it to disk."""
@@ -74,9 +86,11 @@ class ImagingSourceCamera(BaseCamera):
         try:
             filepath = await asyncio.to_thread(self._do_capture)
             self.state.last_image_path = filepath
-            return filepath
-        finally:
             self.state.status = Status.IDLE
+            return filepath
+        except Exception:
+            self.state.status = Status.ERROR
+            raise
 
     def close(self) -> None:
         """Release the image acquirer and GenTL producer resources."""
