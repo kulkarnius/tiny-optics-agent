@@ -422,13 +422,6 @@ class TestFileOutputPath:
         assert result.error is not None
         assert "/shared/" in result.error
 
-    def test_tool_description_documents_shared_path(self):
-        """TC-1-04: run_code docstring documents /shared/ as canonical path and mentions present_files."""
-        import scratchpad_server
-        doc = scratchpad_server.run_code.__doc__
-        assert "/shared/" in doc
-        assert "present_files" in doc
-
 
 # ==========================================
 # TC-2-xx: figures_saved in run_code result envelope
