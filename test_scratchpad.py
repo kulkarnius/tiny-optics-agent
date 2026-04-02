@@ -528,3 +528,68 @@ class TestSessionPersistence:
         r3 = run(event_loop, scratchpad.execute("print(c)"))
         assert not r3.success
         assert "NameError" in r3.error
+
+
+# ==========================================
+# copy_file_to_scratchpad (no Docker required)
+# ==========================================
+
+class TestCopyFileToScratchpad:
+    def test_copies_file_to_shared_dir(self, tmp_path, monkeypatch):
+        import scratchpad_server
+        monkeypatch.setattr(scratchpad_server, "SHARED_DIR", tmp_path / "shared")
+
+        src = tmp_path / "capture.jpg"
+        src.write_bytes(b"fake jpeg data")
+
+        result = asyncio.run(scratchpad_server.copy_file_to_scratchpad(str(src)))
+
+        dest = tmp_path / "shared" / "capture.jpg"
+        assert dest.exists()
+        assert dest.read_bytes() == b"fake jpeg data"
+        assert "/shared/capture.jpg" in result
+
+    def test_custom_dest_filename(self, tmp_path, monkeypatch):
+        import scratchpad_server
+        monkeypatch.setattr(scratchpad_server, "SHARED_DIR", tmp_path / "shared")
+
+        src = tmp_path / "capture_001.jpg"
+        src.write_bytes(b"image data")
+
+        result = asyncio.run(scratchpad_server.copy_file_to_scratchpad(str(src), "renamed.jpg"))
+
+        assert (tmp_path / "shared" / "renamed.jpg").exists()
+        assert not (tmp_path / "shared" / "capture_001.jpg").exists()
+        assert "/shared/renamed.jpg" in result
+
+    def test_source_not_found_returns_error(self, tmp_path, monkeypatch):
+        import scratchpad_server
+        monkeypatch.setattr(scratchpad_server, "SHARED_DIR", tmp_path / "shared")
+
+        result = asyncio.run(scratchpad_server.copy_file_to_scratchpad("/nonexistent/file.jpg"))
+
+        assert result.startswith("Error:")
+        assert "not found" in result
+
+    def test_source_is_directory_returns_error(self, tmp_path, monkeypatch):
+        import scratchpad_server
+        monkeypatch.setattr(scratchpad_server, "SHARED_DIR", tmp_path / "shared")
+
+        result = asyncio.run(scratchpad_server.copy_file_to_scratchpad(str(tmp_path)))
+
+        assert result.startswith("Error:")
+        assert "not a file" in result
+
+    def test_creates_shared_dir_if_missing(self, tmp_path, monkeypatch):
+        import scratchpad_server
+        shared = tmp_path / "shared"
+        monkeypatch.setattr(scratchpad_server, "SHARED_DIR", shared)
+        assert not shared.exists()
+
+        src = tmp_path / "data.npy"
+        src.write_bytes(b"\x93NUMPY fake")
+
+        asyncio.run(scratchpad_server.copy_file_to_scratchpad(str(src)))
+
+        assert shared.exists()
+        assert (shared / "data.npy").exists()
