@@ -56,7 +56,7 @@ class ImagingSourceCamera(BaseCamera):
 
         self._ia.start()
         try:
-            with self._ia.fetch() as buffer:
+            with self._ia.fetch(timeout=2.0) as buffer:
                 component = buffer.payload.components[0]
                 frame = np.array(component.data).reshape(component.height, component.width)
 

@@ -4,11 +4,35 @@ import os
 import json
 import signal
 import sys
+import psutil
 from mcp.server.fastmcp import FastMCP, Image
 from pydantic import ValidationError
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Configure logging early so the kill message is visible
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def _kill_existing_instances() -> None:
+    """Kill any stale instances of this server left over from a previous session."""
+    current_pid = os.getpid()
+    script = os.path.abspath(__file__)
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        if proc.pid == current_pid:
+            continue
+        try:
+            cmdline = proc.info.get("cmdline") or []
+            if any(script in arg for arg in cmdline):
+                logger.info("Killing stale %s instance (PID %s).", os.path.basename(script), proc.pid)
+                proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+
+_kill_existing_instances()
 
 # Import our hardware classes from the devices folder
 from devices.camera import MockCamera
@@ -25,10 +49,6 @@ try:
     _ImagingSourceCamera = ImagingSourceCamera
 except Exception:
     _ImagingSourceCamera = None
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-logger = logging.getLogger(__name__)
 
 # Initialize the FastMCP server
 # This automatically handles stdio communication and routing

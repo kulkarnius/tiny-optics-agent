@@ -1,8 +1,10 @@
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import psutil
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, Field, ValidationError
 
@@ -12,6 +14,25 @@ from rag.index import RAGIndex
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _kill_existing_instances() -> None:
+    """Kill any stale instances of this server left over from a previous session."""
+    current_pid = os.getpid()
+    script = os.path.abspath(__file__)
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        if proc.pid == current_pid:
+            continue
+        try:
+            cmdline = proc.info.get("cmdline") or []
+            if any(script in arg for arg in cmdline):
+                logger.info("Killing stale %s instance (PID %s).", os.path.basename(script), proc.pid)
+                proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+
+_kill_existing_instances()
 
 # Set up paths relative to this file
 BASE_DIR = Path(__file__).parent
