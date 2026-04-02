@@ -2,6 +2,7 @@
 mcp[cli]
 python-dotenv
 pydantic
+psutil
 
 # --- Hardware Server ---
 numpy
