@@ -221,7 +221,7 @@ async def capture_image() -> str:
     try:
         filepath = await camera.capture()
         return (f"Success: Image captured and saved to disk at {filepath}. "
-                f"To view the image, read the resource: 'camera://latest'")
+                f"To view the image, call get_latest_image")
     except Exception as e:
         return f"Error: {e}"
 
