@@ -15,6 +15,24 @@ class LaserError(Exception):
 
 
 class Laser:
+    def get_state(self) -> bool:
+        """GET the relay outlet state. Returns True if the laser is on, False if off."""
+        logger.info("Laser get_state called")
+        try:
+            resp = requests.get(
+                LASER_URL,
+                auth=HTTPDigestAuth(LASER_USER, LASER_PASS),
+                headers={"X-CSRF": "x"},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            on = resp.json().get("value", False)
+            logger.info("Laser relay state: %s", on)
+            return bool(on)
+        except requests.RequestException as e:
+            logger.error("Laser relay get_state failed: %s", e)
+            raise LaserError(str(e)) from e
+
     def set_state(self, on: bool) -> None:
         """PUT value=true/false to the relay outlet to turn the laser on or off."""
         state_str = "true" if on else "false"

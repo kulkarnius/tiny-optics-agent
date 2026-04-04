@@ -134,6 +134,13 @@ logger.info("Laser controller initialized.")
 @mcp.tool()
 def get_inventory() -> str:
     """Returns a JSON snapshot of all hardware devices and their current states."""
+    try:
+        laser_on = laser.get_state()
+        laser_info = {"on": laser_on}
+    except LaserError as e:
+        logger.warning("Could not read laser state for inventory: %s", e)
+        laser_info = {"on": None, "error": str(e)}
+
     inventory = {
         "motor": {
             **motor.get_state().model_dump(),
@@ -146,7 +153,8 @@ def get_inventory() -> str:
             "exposure_min": camera.EXPOSURE_MIN,
             "exposure_max": camera.EXPOSURE_MAX,
             "exposure_units": camera.EXPOSURE_UNITS,
-        }
+        },
+        "laser": laser_info,
     }
     return json.dumps(inventory, indent=2)
 
