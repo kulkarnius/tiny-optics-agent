@@ -10,6 +10,7 @@ _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
 class CameraState(DeviceState):
     exposure: int = Field(default=100, ge=1, le=2000)
+    gain: float = Field(default=0.0, ge=0.0, le=24.0)
     last_image_path: Optional[str] = None
     um_per_pixel: Optional[float] = Field(
         default=None,

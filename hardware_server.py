@@ -153,6 +153,9 @@ def get_inventory() -> str:
             "exposure_min": camera.EXPOSURE_MIN,
             "exposure_max": camera.EXPOSURE_MAX,
             "exposure_units": camera.EXPOSURE_UNITS,
+            "gain_min": camera.GAIN_MIN,
+            "gain_max": camera.GAIN_MAX,
+            "gain_units": camera.GAIN_UNITS,
         },
         "laser": laser_info,
     }
@@ -250,25 +253,46 @@ async def refresh_motor() -> str:
     return json.dumps(motor.get_state().model_dump())
 
 @mcp.tool()
-async def configure_camera(exposure_ms: int) -> str:
+async def configure_camera(exposure_ms: int | None = None, gain: float | None = None) -> str:
     """
-    Adjusts the camera sensor settings.
+    Adjusts the camera sensor settings. At least one parameter must be provided.
 
     Args:
-        exposure_ms: Exposure time in milliseconds.
+        exposure_ms: Exposure time in milliseconds. Omit to leave unchanged.
                      Use 10-100 for well-lit/motion scenes, 100-500 for low light.
+        gain:        Sensor gain in dB. Omit to leave unchanged.
+                     Higher values brighten dark images but increase noise.
     """
-    ConfigureParams = camera.make_configure_params()
-    try:
-        params = ConfigureParams(exposure_ms=exposure_ms)
-    except ValidationError as e:
-        return f"Invalid parameters:\n{e}"
+    if exposure_ms is None and gain is None:
+        return "Error: at least one of exposure_ms or gain must be provided."
 
-    try:
-        camera.state.exposure = params.exposure_ms
-    except ValidationError as e:
-        return f"Error setting exposure: {e}"
-    return f"Success: Camera exposure updated to {params.exposure_ms} {camera.EXPOSURE_UNITS}."
+    messages = []
+
+    if exposure_ms is not None:
+        ConfigureParams = camera.make_configure_params()
+        try:
+            params = ConfigureParams(exposure_ms=exposure_ms)
+        except ValidationError as e:
+            return f"Invalid exposure_ms:\n{e}"
+        try:
+            camera.state.exposure = params.exposure_ms
+        except ValidationError as e:
+            return f"Error setting exposure: {e}"
+        messages.append(f"exposure updated to {params.exposure_ms} {camera.EXPOSURE_UNITS}")
+
+    if gain is not None:
+        GainParams = camera.make_gain_params()
+        try:
+            params = GainParams(gain=gain)
+        except ValidationError as e:
+            return f"Invalid gain:\n{e}"
+        try:
+            camera.state.gain = params.gain
+        except ValidationError as e:
+            return f"Error setting gain: {e}"
+        messages.append(f"gain updated to {params.gain} {camera.GAIN_UNITS}")
+
+    return f"Success: Camera {', '.join(messages)}."
 
 @mcp.tool()
 async def capture_image() -> str:
