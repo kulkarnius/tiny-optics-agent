@@ -4,6 +4,9 @@ import os
 import json
 import signal
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
 import psutil
 from mcp.server.fastmcp import FastMCP, Image
 from pydantic import ValidationError
@@ -14,6 +17,14 @@ load_dotenv()
 # Configure logging early so the kill message is visible
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+# All captured images are written into shared/data/ (relative to the project
+# root).  The scratchpad Docker container bind-mounts shared/ → /shared/, so
+# files saved here are immediately accessible at /shared/data/<filename> inside
+# the sandbox — no copy step required.
+SHARED_DATA_DIR = Path(__file__).resolve().parent / "shared" / "data"
+SHARED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+logger.info("Capture output directory: %s", SHARED_DATA_DIR)
 
 
 def _kill_existing_instances() -> None:
@@ -148,6 +159,26 @@ def get_latest_image() -> Image:
     return Image(data=image_bytes, format="jpeg")
 
 
+@mcp.tool()
+def get_latest_image_path() -> str:
+    """
+    Returns the filesystem path of the most recently captured image.
+
+    Use this when you need the path for programmatic access (e.g., loading
+    the image in scratchpad code with cv2.imread or np.load) rather than
+    the raw image bytes returned by get_latest_image.
+
+    The image is accessible inside the scratchpad at /shared/data/<filename>.
+    """
+    image_path = camera.state.last_image_path
+    if not image_path or not os.path.exists(image_path):
+        raise FileNotFoundError(
+            "No image has been captured yet. Run 'capture_image' first."
+        )
+    filename = os.path.basename(image_path)
+    return f"Host path: {image_path}\nScratchpad path: /shared/data/{filename}"
+
+
 # ==========================================
 # TOOLS (Actions the LLM can take)
 # ==========================================
@@ -219,9 +250,15 @@ async def capture_image() -> str:
         Instructions on how to view the newly captured image.
     """
     try:
-        filepath = await camera.capture()
-        return (f"Success: Image captured and saved to disk at {filepath}. "
-                f"To view the image, call get_latest_image")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")[:-3]
+        filename = f"capture_{timestamp}.jpg"
+        dest_path = str(SHARED_DATA_DIR / filename)
+        filepath = await camera.capture(dest_path=dest_path)
+        return (
+            f"Success: Image captured and saved to {filepath}. "
+            f"To view the image, call get_latest_image. "
+            f"The scratchpad can access it at /shared/data/{filename}"
+        )
     except Exception as e:
         return f"Error: {e}"
 

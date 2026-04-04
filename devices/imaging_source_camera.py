@@ -49,8 +49,13 @@ class ImagingSourceCamera(BaseCamera):
 
         self._ia = self._harvester.create(search_key={"serial_number": serial_number})
 
-    def _do_capture(self) -> str:
-        """Synchronous capture executed in a thread pool to avoid blocking the event loop."""
+    def _do_capture(self, dest_path: str | None = None) -> str:
+        """Synchronous capture executed in a thread pool to avoid blocking the event loop.
+
+        Args:
+            dest_path: If provided, save the image to this path instead of
+                       the default data directory.
+        """
         try:
             # Set exposure (GenICam ExposureTime node expects microseconds).
             # ExposureAuto must be Off or the ExposureTime node is read-only.
@@ -68,9 +73,14 @@ class ImagingSourceCamera(BaseCamera):
                     logger.info("Got frame: %sx%s", component.width, component.height)
                     frame = np.array(component.data).reshape(component.height, component.width)
 
-                    self._capture_count += 1
-                    filename = f"capture_{self._capture_count:03d}.jpg"
-                    filepath = os.path.join(self.data_dir, filename)
+                    if dest_path is not None:
+                        filepath = dest_path
+                        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    else:
+                        self._capture_count += 1
+                        filename = f"capture_{self._capture_count:03d}.jpg"
+                        filepath = os.path.join(self.data_dir, filename)
+
                     cv2.imwrite(filepath, frame)
                     logger.info("Saved image to %s", filepath)
                     return filepath
@@ -80,11 +90,16 @@ class ImagingSourceCamera(BaseCamera):
             logger.exception("_do_capture failed: %s: %r", type(e).__name__, e)
             raise RuntimeError(f"{type(e).__name__}: {repr(e)}") from e
 
-    async def capture(self) -> str:
-        """Captures a frame from the camera and saves it to disk."""
+    async def capture(self, dest_path: str | None = None) -> str:
+        """Captures a frame from the camera and saves it to disk.
+
+        Args:
+            dest_path: If provided, save the image to this path instead of
+                       the default data directory.
+        """
         self.state.status = Status.BUSY
         try:
-            filepath = await asyncio.to_thread(self._do_capture)
+            filepath = await asyncio.to_thread(self._do_capture, dest_path)
             self.state.last_image_path = filepath
             self.state.status = Status.IDLE
             return filepath
