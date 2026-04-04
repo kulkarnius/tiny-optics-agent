@@ -18,6 +18,10 @@ async def main():
     camera.state.exposure = 200
     print(f"Camera State after exposure update: {camera.get_state()}\n")
 
+    print("--- Configuring Gain ---")
+    camera.state.gain = 12.0
+    print(f"Camera State after gain update: {camera.get_state()}\n")
+
     print("--- Capturing Image ---")
     filepath = await camera.capture()
     print(f"Camera State after capture: {camera.get_state()}")

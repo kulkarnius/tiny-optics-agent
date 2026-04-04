@@ -16,6 +16,7 @@ _DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
 
 class ImagingSourceCameraState(DeviceState):
     exposure: int = Field(default=100, ge=1, le=2000)
+    gain: float = Field(default=0.0, ge=0.0, le=24.0)
     last_image_path: Optional[str] = None
     um_per_pixel: Optional[float] = Field(
         default=None,
@@ -63,6 +64,11 @@ class ImagingSourceCamera(BaseCamera):
             logger.info("Setting ExposureAuto=Off, ExposureTime=%s µs", self.state.exposure * 1000)
             node_map.ExposureAuto.value = "Off"
             node_map.ExposureTime.value = float(self.state.exposure * 1000)
+
+            # Set gain (GainAuto must be Off or the Gain node is read-only).
+            logger.info("Setting GainAuto=Off, Gain=%s dB", self.state.gain)
+            node_map.GainAuto.value = "Off"
+            node_map.Gain.value = self.state.gain
 
             logger.info("Starting image acquirer...")
             self._ia.start()

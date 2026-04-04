@@ -61,13 +61,17 @@ class BaseMotor(BaseDevice, ABC):
 class BaseCamera(BaseDevice, ABC):
     """Intermediate base class for all camera devices.
 
-    Subclasses declare their exposure limits as class-level attributes.
-    The MCP server calls make_configure_params() to get a Pydantic validator
-    with the correct constraints.
+    Subclasses declare their exposure and gain limits as class-level attributes.
+    The MCP server calls make_configure_params() / make_gain_params() to get
+    Pydantic validators with the correct constraints.
     """
     EXPOSURE_MIN: ClassVar[int] = 1
     EXPOSURE_MAX: ClassVar[int] = 2000
     EXPOSURE_UNITS: ClassVar[str] = "ms"
+
+    GAIN_MIN: ClassVar[float] = 0.0
+    GAIN_MAX: ClassVar[float] = 24.0
+    GAIN_UNITS: ClassVar[str] = "dB"
 
     @classmethod
     def make_configure_params(cls) -> Type[BaseModel]:
@@ -77,4 +81,14 @@ class BaseCamera(BaseDevice, ABC):
         return create_model(
             f"{cls.__name__}ConfigureParams",
             exposure_ms=(int, PydanticField(ge=cls.EXPOSURE_MIN, le=cls.EXPOSURE_MAX, description=desc)),
+        )
+
+    @classmethod
+    def make_gain_params(cls) -> Type[BaseModel]:
+        """Return a Pydantic model whose gain field carries the
+        ge/le constraints derived from this class's GAIN_MIN/MAX."""
+        desc = f"Gain in {cls.GAIN_UNITS} ({cls.GAIN_MIN}-{cls.GAIN_MAX})"
+        return create_model(
+            f"{cls.__name__}GainParams",
+            gain=(float, PydanticField(ge=cls.GAIN_MIN, le=cls.GAIN_MAX, description=desc)),
         )
