@@ -1,4 +1,6 @@
 import asyncio
+import os
+import tempfile
 from devices.motor import MockMotor
 from devices.camera import MockCamera
 
@@ -25,10 +27,22 @@ async def main():
     except Exception as e:
         print(f"Caught expected validation error: {type(e).__name__}")
 
-    print("\n--- Executing Camera Capture ---")
+    print("\n--- Executing Camera Capture (default path) ---")
     filepath = await camera.capture()
     print(f"Camera State after capture: {camera.get_state()}")
-    print(f"Image saved successfully to: {filepath}\n")
+    print(f"Image saved successfully to: {filepath}")
+    assert os.path.exists(filepath), f"File not found: {filepath}"
+
+    print("\n--- Executing Camera Capture (custom dest_path) ---")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dest = os.path.join(tmpdir, "custom_capture.jpg")
+        filepath2 = await camera.capture(dest_path=dest)
+        assert filepath2 == dest, f"Expected {dest}, got {filepath2}"
+        assert os.path.exists(filepath2), f"File not found: {filepath2}"
+        assert camera.state.last_image_path == dest
+        print(f"dest_path capture succeeded: {filepath2}")
+
+    print("\nAll tests passed!")
 
 if __name__ == "__main__":
     asyncio.run(main())

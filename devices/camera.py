@@ -28,24 +28,35 @@ class MockCamera(BaseCamera):
         # Ensure the data directory exists
         os.makedirs(self.data_dir, exist_ok=True)
 
-    async def capture(self) -> str:
-        """Mocks capturing a frame and saving it to disk."""
+    async def capture(self, dest_path: str | None = None) -> str:
+        """Mocks capturing a frame and saving it to disk.
+
+        Args:
+            dest_path: If provided, save the image to this path instead of
+                       the default data directory.  Parent dirs are created
+                       automatically.
+        """
         self.state.status = Status.BUSY
         self._capture_count += 1
-        
+
         # Generate a blank 2D grayscale array (480x640)
         blank_frame = np.zeros((480, 640), dtype=np.uint8)
-        
+
         # Add a mock label so we know it's working
-        cv2.putText(blank_frame, f"Mock Capture #{self._capture_count}", 
+        cv2.putText(blank_frame, f"Mock Capture #{self._capture_count}",
                     (50, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,), 2)
-        
+
         # Save to disk
-        filename = f"capture_{self._capture_count:03d}.jpg"
-        filepath = os.path.join(self.data_dir, filename)
+        if dest_path is not None:
+            filepath = dest_path
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        else:
+            filename = f"capture_{self._capture_count:03d}.jpg"
+            filepath = os.path.join(self.data_dir, filename)
+
         cv2.imwrite(filepath, blank_frame)
-        
+
         self.state.last_image_path = filepath
         self.state.status = Status.IDLE
-        
+
         return filepath
