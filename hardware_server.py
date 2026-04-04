@@ -18,12 +18,14 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# All captured images are written into shared/data/ (relative to the project
-# root).  The scratchpad Docker container bind-mounts shared/ → /shared/, so
-# files saved here are immediately accessible at /shared/data/<filename> inside
-# the sandbox — no copy step required.
-SHARED_DATA_DIR = Path(__file__).resolve().parent / "shared" / "data"
+# shared/ is the volume bind-mounted into the scratchpad Docker container at
+# /shared/.  All file outputs (camera captures and scratchpad figures) live
+# under this tree so both the host process and the sandbox can reach them
+# without any copy step.
+SHARED_DIR = Path(__file__).resolve().parent / "shared"
+SHARED_DATA_DIR = SHARED_DIR / "data"
 SHARED_DATA_DIR.mkdir(parents=True, exist_ok=True)
+logger.info("Shared directory: %s", SHARED_DIR)
 logger.info("Capture output directory: %s", SHARED_DATA_DIR)
 
 
@@ -143,40 +145,54 @@ def get_inventory() -> str:
     }
     return json.dumps(inventory, indent=2)
 
-#@mcp.resource("camera://latest")
 @mcp.tool()
-def get_latest_image() -> Image:
-    """Returns the raw binary data of the most recently captured image."""
-    image_path = camera.state.last_image_path
+def display_image(filename: str) -> Image:
+    """
+    Loads an image from the shared directory and returns it for inline rendering.
 
-    if not image_path or not os.path.exists(image_path):
-        raise FileNotFoundError("No image has been captured yet. Run 'capture_image' tool first.")
+    Claude renders the returned image directly inline in the conversation —
+    no separate viewer, no path translation, and no present_files call needed.
 
-    # FastMCP's Image class handles reading the bytes and setting the correct mime type
-    with open(image_path, "rb") as f:
-        image_bytes = f.read()
+    Use this tool to display:
+    - Camera captures: pass the filename reported by capture_image
+      (e.g. "data/capture_20260403T150432_123.jpg")
+    - Scratchpad figures: pass the basename of any file saved to /shared/
+      inside scratchpad code (e.g. "my_plot.png" for plt.savefig('/shared/my_plot.png'))
 
-    return Image(data=image_bytes, format="jpeg")
+    Args:
+        filename: Path relative to the shared directory root.
+    """
+    image_path = (SHARED_DIR / filename).resolve()
+    # Prevent path traversal outside the shared directory
+    if not str(image_path).startswith(str(SHARED_DIR.resolve())):
+        raise ValueError(f"filename must be relative to the shared directory: {filename!r}")
+    if not image_path.exists():
+        raise FileNotFoundError(
+            f"No file found at shared/{filename}. "
+            "For camera captures, call capture_image first. "
+            "For scratchpad figures, ensure the file was saved to /shared/<filename>."
+        )
+    fmt = "png" if image_path.suffix.lower() == ".png" else "jpeg"
+    return Image(data=image_path.read_bytes(), format=fmt)
 
 
 @mcp.tool()
 def get_latest_image_path() -> str:
     """
-    Returns the filesystem path of the most recently captured image.
+    Returns the filename of the most recently captured image, relative to the
+    shared directory.
 
-    Use this when you need the path for programmatic access (e.g., loading
-    the image in scratchpad code with cv2.imread or np.load) rather than
-    the raw image bytes returned by get_latest_image.
-
-    The image is accessible inside the scratchpad at /shared/data/<filename>.
+    Use this when you need the path for programmatic access in scratchpad code
+    (e.g. cv2.imread('/shared/' + filename)) rather than displaying the image.
+    To display it inline, pass the returned filename to display_image instead.
     """
     image_path = camera.state.last_image_path
     if not image_path or not os.path.exists(image_path):
         raise FileNotFoundError(
             "No image has been captured yet. Run 'capture_image' first."
         )
-    filename = os.path.basename(image_path)
-    return f"Host path: {image_path}\nScratchpad path: /shared/data/{filename}"
+    rel = Path(image_path).relative_to(SHARED_DIR)
+    return str(rel)
 
 
 # ==========================================
@@ -256,8 +272,8 @@ async def capture_image() -> str:
         filepath = await camera.capture(dest_path=dest_path)
         return (
             f"Success: Image captured and saved to {filepath}. "
-            f"To view the image, call get_latest_image. "
-            f"The scratchpad can access it at /shared/data/{filename}"
+            f"To display it inline, call display_image with filename=\"data/{filename}\". "
+            f"The scratchpad can access it at /shared/data/{filename}."
         )
     except Exception as e:
         return f"Error: {e}"
