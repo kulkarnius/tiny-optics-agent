@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 import logging
 import os
@@ -63,6 +64,8 @@ try:
 except Exception:
     _ImagingSourceCamera = None
 
+from devices.laser import Laser, LaserError
+
 # Initialize the FastMCP server
 # This automatically handles stdio communication and routing
 mcp = FastMCP("Hardware Controller")
@@ -119,6 +122,8 @@ else:  # auto
         camera = MockCamera()
         logger.info("Mock camera initialized.")
 
+laser = Laser()
+logger.info("Laser controller initialized.")
 
 
 # ==========================================
@@ -129,6 +134,13 @@ else:  # auto
 @mcp.tool()
 def get_inventory() -> str:
     """Returns a JSON snapshot of all hardware devices and their current states."""
+    try:
+        laser_on = laser.get_state()
+        laser_info = {"on": laser_on}
+    except LaserError as e:
+        logger.warning("Could not read laser state for inventory: %s", e)
+        laser_info = {"on": None, "error": str(e)}
+
     inventory = {
         "motor": {
             **motor.get_state().model_dump(),
@@ -141,7 +153,8 @@ def get_inventory() -> str:
             "exposure_min": camera.EXPOSURE_MIN,
             "exposure_max": camera.EXPOSURE_MAX,
             "exposure_units": camera.EXPOSURE_UNITS,
-        }
+        },
+        "laser": laser_info,
     }
     return json.dumps(inventory, indent=2)
 
@@ -277,6 +290,25 @@ async def capture_image() -> str:
         )
     except Exception as e:
         return f"Error: {e}"
+
+
+@mcp.tool()
+async def set_laser(on: bool) -> str:
+    """
+    Turn the laser on or off via the relay controller.
+
+    Args:
+        on: True to turn the laser on, False to turn it off.
+    """
+    logger.info("MCP set_laser called: on=%s", on)
+    try:
+        await asyncio.to_thread(laser.set_state, on)
+    except LaserError as e:
+        logger.error("MCP set_laser failed: %s", e)
+        return f"Error: {e}"
+    state = "ON" if on else "OFF"
+    logger.info("MCP set_laser succeeded: laser is %s", state)
+    return f"Laser turned {state}."
 
 
 def _close_devices() -> None:
