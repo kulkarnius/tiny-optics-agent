@@ -30,6 +30,10 @@ class PDXCMotor(BaseMotor):
     HOMING_TIMEOUT_S = 60
     HOMING_POLL_INTERVAL_S = 0.5
 
+    MOVE_TOLERANCE_MM = 0.001       # position error threshold to consider move complete
+    MOVE_POLL_INTERVAL_S = 0.05     # seconds between GetCurrentPosition polls
+    MOVE_TIMEOUT_S = 30             # seconds before raising RuntimeError
+
     def __init__(self, serial_number: str | None = None):
         super().__init__()
         self.state = PDXCMotorState()
@@ -106,10 +110,36 @@ class PDXCMotor(BaseMotor):
             raise
 
     def _move_sync(self, target_position: float) -> None:
-        """Synchronous absolute move."""
+        """Synchronous absolute move — blocks until position settles or timeout."""
         ret = self._pdxc.SetTargetPosition(0, target_position)
         if ret < 0:
             raise RuntimeError(f"SetTargetPosition failed (ret={ret}).")
+
+        deadline = time.monotonic() + self.MOVE_TIMEOUT_S
+        pos = [0.0]
+
+        while time.monotonic() < deadline:
+            ret = self._pdxc.GetCurrentPosition(0, pos)
+            if ret == 0 and abs(pos[0] - target_position) < self.MOVE_TOLERANCE_MM:
+                return  # arrived
+
+            err = [0]
+            if self._pdxc.GetErrorMessage(0, err) == 0 and err[0] != 0:
+                raise RuntimeError(
+                    f"Motor error during move to {target_position} mm (error code {err[0]})."
+                )
+
+            time.sleep(self.MOVE_POLL_INTERVAL_S)
+
+        self._pdxc.GetCurrentPosition(0, pos)
+        logger.warning(
+            "Move timeout: target=%.4f mm, last_pos=%.4f mm after %.1f s.",
+            target_position, pos[0], self.MOVE_TIMEOUT_S,
+        )
+        raise RuntimeError(
+            f"Motor move to {target_position} mm timed out after {self.MOVE_TIMEOUT_S} s "
+            f"(last position: {pos[0]:.4f} mm)."
+        )
 
     async def move_to(self, target_position: float) -> float:
         """Move motor to an absolute position (mm)."""
