@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 import logging
 import os
@@ -63,6 +64,8 @@ try:
 except Exception:
     _ImagingSourceCamera = None
 
+from devices.laser import Laser, LaserError
+
 # Initialize the FastMCP server
 # This automatically handles stdio communication and routing
 mcp = FastMCP("Hardware Controller")
@@ -119,6 +122,8 @@ else:  # auto
         camera = MockCamera()
         logger.info("Mock camera initialized.")
 
+laser = Laser()
+logger.info("Laser controller initialized.")
 
 
 # ==========================================
@@ -277,6 +282,25 @@ async def capture_image() -> str:
         )
     except Exception as e:
         return f"Error: {e}"
+
+
+@mcp.tool()
+async def set_laser(on: bool) -> str:
+    """
+    Turn the laser on or off via the relay controller.
+
+    Args:
+        on: True to turn the laser on, False to turn it off.
+    """
+    logger.info("MCP set_laser called: on=%s", on)
+    try:
+        await asyncio.to_thread(laser.set_state, on)
+    except LaserError as e:
+        logger.error("MCP set_laser failed: %s", e)
+        return f"Error: {e}"
+    state = "ON" if on else "OFF"
+    logger.info("MCP set_laser succeeded: laser is %s", state)
+    return f"Laser turned {state}."
 
 
 def _close_devices() -> None:

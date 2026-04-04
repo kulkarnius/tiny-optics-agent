@@ -7,6 +7,7 @@ psutil
 # --- Hardware Server ---
 numpy
 opencv-python
+requests
 
 # --- RAG Server ---
 sentence-transformers
