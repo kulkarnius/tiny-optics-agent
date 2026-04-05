@@ -1,6 +1,8 @@
+import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from rag.embedder import Embedder
 from rag.index import RAGIndex
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -39,22 +41,39 @@ BASE_DIR = Path(__file__).parent
 DOCS_DIR = BASE_DIR / "documents"
 DATA_DIR = BASE_DIR / "data"
 
-# These are populated during lifespan startup, after the MCP initialize handshake
+# Populated by background init task; tools wait on this event before proceeding
 embedder: Embedder | None = None
 index: RAGIndex | None = None
+_ready = asyncio.Event()
 
 
-@asynccontextmanager
-async def lifespan(server):
+async def _init_background() -> None:
+    """Load the embedding model and sync the index in the background.
+
+    This runs after the MCP initialize handshake completes so the client does
+    not time out waiting for heavy model loading.
+    """
     global embedder, index
 
-    logger.info("Loading embedding model...")
-    embedder = Embedder()
-    logger.info("Embedding model loaded.")
+    t0 = time.monotonic()
+    logger.info("Background init: loading embedding model (%s)...", "BAAI/bge-small-en-v1.5")
+    try:
+        embedder = Embedder()
+        logger.info("Background init: embedding model loaded in %.1fs.", time.monotonic() - t0)
+    except Exception:
+        logger.exception("Background init: failed to load embedding model.")
+        return
 
-    index = RAGIndex(docs_dir=DOCS_DIR, data_dir=DATA_DIR, embedder=embedder)
-    logger.info("Syncing document index...")
-    index.sync()
+    t1 = time.monotonic()
+    logger.info("Background init: creating RAGIndex (docs=%s, data=%s)...", DOCS_DIR, DATA_DIR)
+    try:
+        index = RAGIndex(docs_dir=DOCS_DIR, data_dir=DATA_DIR, embedder=embedder)
+        logger.info("Background init: syncing document index...")
+        index.sync()
+        logger.info("Background init: index sync done in %.1fs.", time.monotonic() - t1)
+    except Exception:
+        logger.exception("Background init: failed to initialise/sync RAGIndex.")
+        return
 
     try:
         from ingest.pipeline import is_pipeline_running
@@ -66,7 +85,24 @@ async def lifespan(server):
     except ImportError:
         pass
 
+    logger.info("Background init: complete (total %.1fs). Server ready.", time.monotonic() - t0)
+    _ready.set()
+
+
+@asynccontextmanager
+async def lifespan(server):
+    # Yield immediately so the MCP initialize handshake can complete before we
+    # spend 10-30 s loading the embedding model (which was causing client timeouts).
+    logger.info("Lifespan: starting — launching background init task.")
+    task = asyncio.create_task(_init_background())
+    logger.debug("Lifespan: yielding control to MCP (handshake can now complete).")
     yield
+    logger.info("Lifespan: shutdown requested — cancelling background init task if still running.")
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 # Initialize the FastMCP server
@@ -93,8 +129,11 @@ class GetFullSectionParams(BaseModel):
 
 #@mcp.resource("rag://document-list")
 @mcp.tool()
-def list_documents() -> str:
+async def list_documents() -> str:
     """Returns a JSON list of all indexed documents with their heading outlines."""
+    if not _ready.is_set():
+        logger.debug("list_documents: waiting for background init to complete...")
+    await _ready.wait()
     docs = index.list_documents()
     return json.dumps(docs, indent=2)
 
@@ -104,7 +143,7 @@ def list_documents() -> str:
 # ==========================================
 
 @mcp.tool()
-def search_documents(query: str, top_k: int = 5) -> str:
+async def search_documents(query: str, top_k: int = 5) -> str:
     """
     Search through indexed technical documents using semantic similarity.
 
@@ -115,6 +154,10 @@ def search_documents(query: str, top_k: int = 5) -> str:
         query: The search query. Can be a question, keyword, or description of what you're looking for.
         top_k: Number of results to return (default 5).
     """
+    if not _ready.is_set():
+        logger.debug("search_documents: waiting for background init to complete...")
+    await _ready.wait()
+
     try:
         params = SearchDocumentsParams(query=query, top_k=top_k)
     except ValidationError as e:
@@ -141,7 +184,7 @@ def search_documents(query: str, top_k: int = 5) -> str:
 
 
 @mcp.tool()
-def get_full_section(source_file: str, section_heading: str) -> str:
+async def get_full_section(source_file: str, section_heading: str) -> str:
     """
     Retrieve the full text of a document section by heading name.
 
@@ -152,6 +195,10 @@ def get_full_section(source_file: str, section_heading: str) -> str:
         source_file: The filename (e.g., "optics.md") from a search result.
         section_heading: The section heading text to retrieve (partial match supported).
     """
+    if not _ready.is_set():
+        logger.debug("get_full_section: waiting for background init to complete...")
+    await _ready.wait()
+
     try:
         params = GetFullSectionParams(source_file=source_file, section_heading=section_heading)
     except ValidationError as e:
