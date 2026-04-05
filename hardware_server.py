@@ -7,10 +7,11 @@ import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Annotated, Literal, Union
 
 import psutil
 from mcp.server.fastmcp import FastMCP, Image
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -124,6 +125,23 @@ else:  # auto
 
 laser = Laser()
 logger.info("Laser controller initialized.")
+
+
+# ==========================================
+# BATCH COMMAND MODELS
+# ==========================================
+
+class MoveCommand(BaseModel):
+    type: Literal["move"]
+    position: float
+
+class CaptureCommand(BaseModel):
+    type: Literal["capture"]
+
+BatchCommand = Annotated[
+    Union[MoveCommand, CaptureCommand],
+    Field(discriminator="type"),
+]
 
 
 # ==========================================
@@ -294,6 +312,15 @@ async def configure_camera(exposure_ms: int | None = None, gain: float | None = 
 
     return f"Success: Camera {', '.join(messages)}."
 
+async def _do_capture() -> tuple[str, str]:
+    """Capture one image. Returns (full_path, rel_path) where rel_path is relative to shared/."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")[:-3]
+    filename = f"capture_{timestamp}.jpg"
+    dest_path = str(SHARED_DATA_DIR / filename)
+    filepath = await camera.capture(dest_path=dest_path)
+    return filepath, f"data/{filename}"
+
+
 @mcp.tool()
 async def capture_image() -> str:
     """
@@ -303,17 +330,58 @@ async def capture_image() -> str:
         Instructions on how to view the newly captured image.
     """
     try:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")[:-3]
-        filename = f"capture_{timestamp}.jpg"
-        dest_path = str(SHARED_DATA_DIR / filename)
-        filepath = await camera.capture(dest_path=dest_path)
+        filepath, rel_path = await _do_capture()
         return (
             f"Success: Image captured and saved to {filepath}. "
-            f"To display it inline, call display_image with filename=\"data/{filename}\". "
-            f"The scratchpad can access it at /shared/data/{filename}."
+            f"To display it inline, call display_image with filename=\"{rel_path}\". "
+            f"The scratchpad can access it at /shared/{rel_path}."
         )
     except Exception as e:
         return f"Error: {e}"
+
+
+@mcp.tool()
+async def batch_commands(commands: list[BatchCommand]) -> str:
+    """Execute an ordered sequence of move and/or capture commands in a single call.
+
+    Commands execute strictly in order. If any step fails, execution stops and
+    the response reports which step failed along with all results up to that point.
+
+    Each command must have a "type" field:
+      {"type": "move", "position": <float>}   — move motor to an absolute position
+      {"type": "capture"}                      — capture and save an image to the
+                                                 shared directory (shared/data/)
+
+    Captured images are saved to the shared directory and accessible to the
+    scratchpad at /shared/data/<filename>. Each capture result line includes the
+    full saved path and the display_image call to render the image inline.
+    """
+    results = []
+    for i, cmd in enumerate(commands):
+        if isinstance(cmd, MoveCommand):
+            MoveParams = motor.make_move_params()
+            try:
+                params = MoveParams(target_position=cmd.position)
+            except ValidationError as e:
+                results.append(f"[{i}] move FAILED (validation): {e}")
+                return "\n".join(results)
+            try:
+                final_pos = await motor.move_to(params.target_position)
+                results.append(f"[{i}] move OK → {final_pos} {motor.POSITION_UNITS}")
+            except Exception as e:
+                results.append(f"[{i}] move FAILED: {e}")
+                return "\n".join(results)
+        elif isinstance(cmd, CaptureCommand):
+            try:
+                filepath, rel_path = await _do_capture()
+                results.append(
+                    f"[{i}] capture OK → saved to {filepath} "
+                    f"(display: display_image filename=\"{rel_path}\")"
+                )
+            except Exception as e:
+                results.append(f"[{i}] capture FAILED: {e}")
+                return "\n".join(results)
+    return "\n".join(results)
 
 
 @mcp.tool()
