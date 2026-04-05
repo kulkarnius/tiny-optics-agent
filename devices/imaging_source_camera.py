@@ -11,7 +11,7 @@ from .base import BaseCamera, DeviceState, Status
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
+_DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "shared" / "data")
 
 
 class ImagingSourceCameraState(DeviceState):

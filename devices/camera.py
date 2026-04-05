@@ -6,7 +6,7 @@ from pydantic import Field
 from typing import Optional
 from .base import BaseCamera, DeviceState, Status
 
-_DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "data")
+_DEFAULT_DATA_DIR = str(Path(__file__).parent.parent / "shared" / "data")
 
 class CameraState(DeviceState):
     exposure: int = Field(default=100, ge=1, le=2000)

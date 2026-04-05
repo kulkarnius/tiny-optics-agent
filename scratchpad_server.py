@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import shutil
 from pathlib import Path
 from uuid import uuid4
 
@@ -198,34 +197,6 @@ async def list_figures() -> str:
 
     return "Saved figures (use Read tool on these paths to present them):\n" + "\n".join(files)
 
-
-@mcp.tool()
-async def copy_file_to_scratchpad(source_path: str, dest_filename: str | None = None) -> str:
-    """
-    Copy any file from the host filesystem into the scratchpad shared directory.
-
-    Makes the file accessible inside the sandbox at /shared/<filename>, so it can
-    be read by run_code (e.g. cv2.imread('/shared/capture.jpg'), np.load('/shared/data.npy')).
-
-    Args:
-        source_path: Absolute path to the file on the host filesystem.
-        dest_filename: Filename to use inside the shared directory. Defaults to the
-                       source file's basename.
-
-    Returns:
-        The sandbox path (/shared/<filename>) where the file is now accessible.
-    """
-    src = Path(source_path)
-    if not src.exists():
-        return f"Error: source file not found: {source_path}"
-    if not src.is_file():
-        return f"Error: source path is not a file: {source_path}"
-
-    filename = dest_filename if dest_filename else src.name
-    dest = SHARED_DIR / filename
-    SHARED_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-    return f"Copied to /shared/{filename} ({dest.stat().st_size / 1024:.1f} KB). Access it in run_code at '/shared/{filename}'."
 
 
 if __name__ == "__main__":
