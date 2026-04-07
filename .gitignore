@@ -8,3 +8,6 @@ data/**
 
 shared/
 results/
+drop/
+*pid
+logs/

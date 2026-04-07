@@ -233,6 +233,18 @@ positions. The camera pixel size p_x and magnification must satisfy:
 
 For a typical CCD with 5.5 µm pixels, the minimum measurable w is ~28 µm.
 
+### 5.4 Edge Cases
+
+The real beams you profile will likely not be perfect 2D Gaussians. Use the x-projection and y-projection
+of the camera image to fit independent Gaussians to each profile to recover w_x and w_y from the camera.
+
+    I_x(x) = A_x * exp(-2 * ((x - x0)^2 / w_x^2)) + B_x
+
+    I_y(y) = A_y * exp(-2 * ((y - y0)^2 / w_y^2)) + B_y
+
+Real fits need not follow ISO standards as long as there is sufficient data to make a good claim about
+the incoming beam profile.
+
 ---
 
 ## 6. Experimental Validation (He-Ne Laser, 632 nm)
