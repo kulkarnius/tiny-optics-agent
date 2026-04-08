@@ -271,7 +271,7 @@ async def refresh_motor() -> str:
     return json.dumps(motor.get_state().model_dump())
 
 @mcp.tool()
-async def configure_camera(exposure_ms: int | None = None, gain: float | None = None) -> str:
+async def configure_camera(exposure_ms: float | None = None, gain: float | None = None) -> str:
     """
     Adjusts the camera sensor settings. At least one parameter must be provided.
 
