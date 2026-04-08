@@ -65,8 +65,8 @@ class BaseCamera(BaseDevice, ABC):
     The MCP server calls make_configure_params() / make_gain_params() to get
     Pydantic validators with the correct constraints.
     """
-    EXPOSURE_MIN: ClassVar[int] = 1
-    EXPOSURE_MAX: ClassVar[int] = 2000
+    EXPOSURE_MIN: ClassVar[float] = 1
+    EXPOSURE_MAX: ClassVar[float] = 2000
     EXPOSURE_UNITS: ClassVar[str] = "ms"
 
     GAIN_MIN: ClassVar[float] = 0.0
@@ -77,10 +77,10 @@ class BaseCamera(BaseDevice, ABC):
     def make_configure_params(cls) -> Type[BaseModel]:
         """Return a Pydantic model whose exposure_ms field carries the
         ge/le constraints derived from this class's EXPOSURE_MIN/MAX."""
-        desc = f"Exposure time in {cls.EXPOSURE_UNITS} ({cls.EXPOSURE_MIN}-{cls.EXPOSURE_MAX})"
+        desc = f"Exposure time in {cls.EXPOSURE_UNITS} (min: {cls.EXPOSURE_MIN}, max: {cls.EXPOSURE_MAX})"
         return create_model(
             f"{cls.__name__}ConfigureParams",
-            exposure_ms=(int, PydanticField(ge=cls.EXPOSURE_MIN, le=cls.EXPOSURE_MAX, description=desc)),
+            exposure_ms=(float, PydanticField(gt=0, le=cls.EXPOSURE_MAX, description=desc)),
         )
 
     @classmethod
