@@ -15,11 +15,11 @@ async def main():
     print(f"Initial Camera State: {camera.get_state()}\n")
 
     print("--- Configuring Exposure ---")
-    camera.state.exposure = 200
+    camera.state.exposure = 1.0
     print(f"Camera State after exposure update: {camera.get_state()}\n")
 
     print("--- Configuring Gain ---")
-    camera.state.gain = 12.0
+    camera.state.gain = 1.0
     print(f"Camera State after gain update: {camera.get_state()}\n")
 
     print("--- Capturing Image ---")
