@@ -26,7 +26,8 @@ class Laser:
                 timeout=5,
             )
             resp.raise_for_status()
-            on = resp.json().get("value", False)
+            data = resp.json()
+            on = data.get("value", False) if isinstance(data, dict) else bool(data)
             logger.info("Laser relay state: %s", on)
             return bool(on)
         except requests.RequestException as e:
