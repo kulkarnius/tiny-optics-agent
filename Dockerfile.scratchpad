@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir \
     opencv-python-headless \
     numba \
     pandas \
-    pyfftw
+    pyfftw \
+    refractiveindex
 
 RUN useradd -m -u 1000 sandbox \
     && mkdir -p /shared \
