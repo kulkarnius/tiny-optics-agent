@@ -33,8 +33,8 @@ class DockerScratchpad:
         container_name: str = "scratchpad-session",
         shared_dir: Path | None = None,
         timeout: int = 30,
-        memory_limit: str = "512m",
-        cpu_limit: float = 1.0,
+        memory_limit: str = "8g",
+        cpu_limit: float = 4.0,
     ):
         self.image_name = image_name
         self.container_name = container_name
@@ -82,7 +82,7 @@ class DockerScratchpad:
             "--name", self.container_name,
             "--network", "none",
             "--read-only",
-            "--tmpfs", "/tmp:size=64m",
+            "--tmpfs", "/tmp:size=512m",
             "--memory", self.memory_limit,
             "--cpus", str(self.cpu_limit),
             "--mount", f"type=bind,source={self.shared_dir.resolve()},target=/shared",

@@ -95,7 +95,11 @@ async def run_code(code: str, timeout: int = 30) -> str:
     Execute Python code in a persistent sandboxed session.
 
     Variables and functions defined in previous calls persist across calls.
-    Pre-installed libraries: numpy (as np), scipy, sympy, matplotlib.pyplot (as plt), cv2.
+    Pre-installed libraries: numpy (as np), scipy, sympy, matplotlib.pyplot (as plt), cv2, numba, pandas, pyfftw.
+    pyfftw wraps FFTW3 and is the recommended FFT backend for split-step Fourier simulations of
+    nonlinear PDEs (NLSE, Gross-Pitaevskii, beam propagation). Use pyfftw.interfaces.numpy_fft as
+    a drop-in replacement for numpy.fft, or build FFTW plans directly for maximum throughput.
+    scipy.fft(workers=-1) is also available and uses all allocated CPUs via pocketfft.
     Plots are auto-saved to the shared directory. Use plt.plot(), plt.savefig(), etc.
     Images written with cv2.imwrite("/shared/name.png", img) are also detected.
 
