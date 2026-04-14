@@ -1,11 +1,21 @@
 FROM python:3.11-slim
 
+# libgomp1:    OpenMP runtime required for numba @parallel kernels
+# libfftw3-dev: FFTW3 headers + shared libs required by pyfftw
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    libfftw3-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     numpy \
     scipy \
     sympy \
     matplotlib \
-    opencv-python-headless
+    opencv-python-headless \
+    numba \
+    pandas \
+    pyfftw
 
 RUN useradd -m -u 1000 sandbox \
     && mkdir -p /shared \
